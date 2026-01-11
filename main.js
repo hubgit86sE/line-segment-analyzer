@@ -417,13 +417,15 @@ let PARALLEL_ANGLE_THRESHOLD_DEG = 2.0;
 // 平行一致とみなすか（0〜1 の割合）
 let PARALLEL_MIN_INSTRIP_LENGTH = 0.01;
 
+TH = 0.01;
+
 // === 同一間隔グループ用パラメータ ===
 // 法線方向の間隔（px）が seed ± EPS なら同一間隔グループとみなす
 let INTERVAL_EPS = 1.0;
 
 // === 平行線比率用パラメータ ===
 // 幾何級数上の生成点と実線の交点との許容距離（px）
-let RATIO_POINT_EPS = 3.0;   // 
+let RATIO_POINT_EPS = 5.0;   // Python版に合わせて 5px
 
 // 直近の解析結果を再分析用に保持（割合分析で使う）
 let cachedLineSegments = [];
@@ -431,6 +433,9 @@ let cachedExtRelations = [];
 let cachedParallelRelations = [];
 let cachedEqualIntervalRelations = [];
 let cachedRatioRelations = [];
+
+let cachedEqualIntervalGroups = [];   // 同一間隔グループ（Python の ParallelEqualIntervalGroup に相当）
+let cachedRatioPatterns = [];         // 比率パターン（Python の FixedMultiplierParallel に相当）
 
 // OpenCV.js 初期化コールバック
 if (typeof cv !== "undefined") {
@@ -1759,6 +1764,8 @@ function analyzeEqualIntervalRelations(lineSegments) {
     });
   }
 
+  cachedEqualIntervalGroups = groups;
+
   return equalRelations;
 }
 
@@ -2085,6 +2092,8 @@ function analyzeParallelRatioRelations(lineSegments) {
       summary,
     });
   }
+  // Python版 FixedMultiplierParallel 用にグローバルへキャッシュ
+  cachedRatioPatterns = patterns;
 
   return ratioRelations;
 }
@@ -2253,137 +2262,127 @@ function showLineInfo(
 
   html += "</tbody></table></div>";
 
-  // ===== 同一間隔ブロック =====
+// ===== 同一間隔ブロック =====
   html += `<hr style="margin:12px 0;">`;
   html += `<b>同一間隔の分析結果 / Equal-Interval Results</b><br>`;
 
-  let equalHasMatch = 0;
-  for (const er of equalIntervalRelations) {
-    if (er && er.matchedEqual && er.matchedEqual.length > 0) {
-      equalHasMatch++;
-    }
-  }
-  html += `同一間隔パターンを持つ線分 / Segments with equal-interval pattern: ${equalHasMatch} / ${filteredCount}<br><br>`;
+  const eqGroupsAll = Array.isArray(cachedEqualIntervalGroups) ? cachedEqualIntervalGroups : [];
+  const eqDisplayGroups = eqGroupsAll.filter(g => g && Array.isArray(g.pairs) && g.pairs.length > 0);
 
+  html += `同一間隔グループ数 / # of equal-interval groups: ${eqDisplayGroups.length}<br>`;
+  html += `線分総数 / # of segments: ${filteredCount}<br><br>`;
+
+  // ★ 割合を分析ボタン（新：グループ単位）
   html += `
-    <button id="intervalAnalyzeBtn" style="margin-bottom:4px;">
+    <button id="intervalGroupAnalyzeBtn" style="margin-bottom:4px;">
       同一間隔抽出の割合を分析 / Analyze equal-interval extraction ratio
     </button>
     <button id="downloadIntervalExcel" style="margin-left:8px; margin-bottom:4px;">
       同一間隔結果をExcelダウンロード / Download equal-interval results (Excel)
     </button>
-    <div id="intervalAnalysisSummary" style="margin-bottom:8px;"></div>
+    <div id="intervalGroupAnalysisSummary" style="margin-bottom:8px;"></div>
   `;
+  html += `<div id="intervalGroupAnalysisSummary" style="margin-bottom:8px;"></div>`;
 
-  html += `<div id="intervalTableWrapper">`;
-  html += `<table id="intervalTable" border="1" cellspacing="0" cellpadding="4">`;
-  html += "<thead><tr>";
-  html += `<th class="col-small">表示 / Show</th>`;
-  html += `<th class="col-small">#</th>`;
-  html += `<th class="col-small">x1</th>`;
-  html += `<th class="col-small">y1</th>`;
-  html += `<th class="col-small">x2</th>`;
-  html += `<th class="col-small">y2</th>`;
-  html += `<th class="col-small">angle(deg)</th>`;
-  html += `<th class="col-canvas">Interval Object</th>`;
-  html += `<th class="col-canvas">Interval All</th>`;
-  html += `<th class="col-abc">Interval idx</th>`;
-  html += `<th class="col-summary">Interval summary</th>`;
-  html += "</tr></thead><tbody>";
+  if (eqDisplayGroups.length === 0) {
+    html += `<div id="intervalGroupTableWrapper">同一間隔のグループは検出されませんでした / No equal-interval groups detected.</div>`;
+  } else {
+    html += `<div id="intervalGroupTableWrapper">`;
+    html += `<table id="intervalGroupTable" border="1" cellspacing="0" cellpadding="4">`;
+    html += "<thead><tr>";
+    html += `<th class="col-small">表示 / Show</th>`;
+    html += `<th class="col-small">Group #</th>`;
+    html += `<th class="col-small">Interval distance</th>`;
+    html += `<th class="col-small">#pairs</th>`;
+    html += `<th class="col-summary">Segment idx included</th>`;
+    html += `<th class="col-canvas">Equal-interval group thumbnail</th>`;
+    html += "</tr></thead><tbody>";
 
-  lineSegments.forEach((seg, idx) => {
-    const er = equalIntervalRelations[idx];
-    html += `<tr data-iidx="${idx}">`;
+    eqDisplayGroups.forEach((g, gIdx) => {
+      const meanDist = g.dists && g.dists.length > 0
+        ? g.dists.reduce((s, v) => s + v, 0) / g.dists.length
+        : 0;
 
-    html += `<td class="col-small keep-visible"><input type="checkbox" class="irow-toggle" data-index="${idx}" checked></td>`;
-    html += `<td class="col-small keep-visible">${idx}</td>`;
-    html += `<td class="col-small">${seg.x1}</td>`;
-    html += `<td class="col-small">${seg.y1}</td>`;
-    html += `<td class="col-small">${seg.x2}</td>`;
-    html += `<td class="col-small">${seg.y2}</td>`;
-    html += `<td class="col-small">${seg.angle.toFixed(1)}</td>`;
+      const segSet = new Set();
+      if (Array.isArray(g.pairs)) {
+        g.pairs.forEach(p => {
+          if (p && typeof p.a === "number") segSet.add(p.a);
+          if (p && typeof p.b === "number") segSet.add(p.b);
+        });
+      }
+      const segList = Array.from(segSet).sort((a, b) => a - b);
 
-    html += `<td class="col-canvas"><canvas id="iobj_${idx}" style="border:1px solid #ccc;"></canvas></td>`;
-    html += `<td class="col-canvas"><canvas id="iall_${idx}" style="border:1px solid #ccc;"></canvas></td>`;
+      html += `<tr data-gidx="${gIdx}">`;
+      html += `<td class="col-small keep-visible"><input type="checkbox" class="igrp-row-toggle" data-gidx="${gIdx}" checked></td>`;
+      html += `<td class="col-small keep-visible">${gIdx}</td>`;
+      html += `<td class="col-small">${meanDist.toFixed(2)}</td>`;
+      html += `<td class="col-small">${Array.isArray(g.pairs) ? g.pairs.length : 0}</td>`;
+      html += `<td class="col-summary">${segList.join(", ")}</td>`;
+      html += `<td class="col-canvas"><canvas id="iequalgrp_${gIdx}" style="border:1px solid #ccc;"></canvas></td>`;
+      html += "</tr>";
+    });
 
-    if (er) {
-      html += `<td class="col-abc">${(er.matchedEqual || []).join(",")}</td>`;
-      html += `<td class="col-summary">${er.summary}</td>`;
-    } else {
-      html += `<td class="col-abc"></td>`;
-      html += `<td class="col-summary"></td>`;
-    }
+    html += "</tbody></table></div>";
+  }
 
-    html += "</tr>";
-  });
-
-  html += "</tbody></table></div>";
-
-  // ===== 平行線比率ブロック =====
+// ===== 平行線比率ブロック =====
   html += `<hr style="margin:12px 0;">`;
   html += `<b>平行線比率の分析結果 / Parallel-Line Ratio Results</b><br>`;
 
-  let ratioHasMatch = 0;
-  for (const rr of ratioRelations) {
-    if (rr && rr.matchedRatio && rr.matchedRatio.length > 0) {
-      ratioHasMatch++;
-    }
-  }
-  html += `比率パターンを持つ線分 / Segments with ratio pattern: ${ratioHasMatch} / ${filteredCount}<br><br>`;
+  const ratioPatternsAll = Array.isArray(cachedRatioPatterns) ? cachedRatioPatterns : [];
+  const ratioDisplayPatterns = ratioPatternsAll.slice();  // 全パターンを表示
 
+  html += `比率パターン数 / # of ratio patterns: ${ratioDisplayPatterns.length}<br>`;
+  html += `線分総数 / # of segments: ${filteredCount}<br><br>`;
+
+  // ★ 割合を分析ボタン（新：パターン単位）
   html += `
-    <button id="ratioAnalyzeBtn" style="margin-bottom:4px;">
-      平行線比率抽出の割合を分析 / Analyze parallel-line ratio extraction ratio
+    <button id="ratioGroupAnalyzeBtn" style="margin-bottom:4px;">
+      平行線比率抽出の割合を分析 / Analyze parallel-ratio extraction ratio
     </button>
     <button id="downloadRatioExcel" style="margin-left:8px; margin-bottom:4px;">
-      平行線比率結果をExcelダウンロード / Download ratio results (Excel)
+      比率結果をExcelダウンロード / Download ratio results (Excel)
     </button>
-    <div id="ratioAnalysisSummary" style="margin-bottom:8px;"></div>
+    <div id="ratioPatternAnalysisSummary" style="margin-bottom:8px;"></div>
   `;
+  html += `<div id="ratioPatternAnalysisSummary" style="margin-bottom:8px;"></div>`;
 
-  html += `<div id="ratioTableWrapper">`;
-  html += `<table id="ratioTable" border="1" cellspacing="0" cellpadding="4">`;
-  html += "<thead><tr>";
-  html += `<th class="col-small">表示 / Show</th>`;
-  html += `<th class="col-small">#</th>`;
-  html += `<th class="col-small">x1</th>`;
-  html += `<th class="col-small">y1</th>`;
-  html += `<th class="col-small">x2</th>`;
-  html += `<th class="col-small">y2</th>`;
-  html += `<th class="col-small">angle(deg)</th>`;
-  html += `<th class="col-canvas">Ratio Object</th>`;
-  html += `<th class="col-canvas">Ratio All</th>`;
-  html += `<th class="col-abc">Ratio idx</th>`;
-  html += `<th class="col-summary">Ratio summary</th>`;
-  html += "</tr></thead><tbody>";
+  if (ratioDisplayPatterns.length === 0) {
+    html += `<div id="ratioPatternTableWrapper">平行線比率パターンは検出されませんでした / No ratio patterns detected.</div>`;
+  } else {
+    html += `<div id="ratioPatternTableWrapper">`;
+    html += `<table id="ratioPatternTable" border="1" cellspacing="0" cellpadding="4">`;
+    html += "<thead><tr>";
+    html += `<th class="col-small">表示 / Show</th>`;
+    html += `<th class="col-small">Pattern #</th>`;
+    html += `<th class="col-summary">Line idx triplet</th>`;
+    html += `<th class="col-small">Ratio</th>`;
+    html += `<th class="col-summary">Matched line idx</th>`;
+    html += `<th class="col-canvas">Ratio pattern thumbnail</th>`;
+    html += "</tr></thead><tbody>";
 
-  lineSegments.forEach((seg, idx) => {
-    const rr = ratioRelations[idx];
-    html += `<tr data-ridx="${idx}">`;
+    ratioDisplayPatterns.forEach((p, pIdx) => {
+      const triplet = Array.isArray(p.triplet) ? p.triplet.slice().sort((a, b) => a - b) : [];
+      const ratioVal =
+        typeof p.ratio === "number"
+          ? p.ratio
+          : (p.ratio && typeof p.ratio.ratio === "number"
+              ? p.ratio.ratio
+              : null);
+      const matchedIds = Array.isArray(p.extras) ? p.extras.slice().sort((a, b) => a - b) : [];
 
-    html += `<td class="col-small keep-visible"><input type="checkbox" class="rrow-toggle" data-index="${idx}" checked></td>`;
-    html += `<td class="col-small keep-visible">${idx}</td>`;
-    html += `<td class="col-small">${seg.x1}</td>`;
-    html += `<td class="col-small">${seg.y1}</td>`;
-    html += `<td class="col-small">${seg.x2}</td>`;
-    html += `<td class="col-small">${seg.y2}</td>`;
-    html += `<td class="col-small">${seg.angle.toFixed(1)}</td>`;
+      html += `<tr data-pidx="${pIdx}">`;
+      html += `<td class="col-small keep-visible"><input type="checkbox" class="rpattern-row-toggle" data-pidx="${pIdx}" checked></td>`;
+      html += `<td class="col-small keep-visible">${pIdx}</td>`;
+      html += `<td class="col-summary">${triplet.join(", ")}</td>`;
+      html += `<td class="col-small">${ratioVal != null ? ratioVal.toFixed(3) : ""}</td>`;
+      html += `<td class="col-summary">${matchedIds.join(", ")}</td>`;
+      html += `<td class="col-canvas"><canvas id="rratio_${pIdx}" style="border:1px solid #ccc;"></canvas></td>`;
+      html += "</tr>";
+    });
 
-    html += `<td class="col-canvas"><canvas id="robj_${idx}" style="border:1px solid #ccc;"></canvas></td>`;
-    html += `<td class="col-canvas"><canvas id="rall_${idx}" style="border:1px solid #ccc;"></canvas></td>`;
-
-    if (rr) {
-      html += `<td class="col-abc">${(rr.matchedRatio || []).join(",")}</td>`;
-      html += `<td class="col-summary">${rr.summary}</td>`;
-    } else {
-      html += `<td class="col-abc"></td>`;
-      html += `<td class="col-summary"></td>`;
-    }
-
-    html += "</tr>";
-  });
-
-  html += "</tbody></table></div>";
+    html += "</tbody></table></div>";
+  }
 
   // ここまでの HTML を反映
   resultDiv.innerHTML = html;
@@ -2514,121 +2513,185 @@ function showLineInfo(
     });
   }
 
-  // ===== 同一間隔テーブル関連 =====
-  const iTable = document.getElementById("intervalTable");
-  const iTbody = iTable.querySelector("tbody");
-  const intervalSummaryDiv = document.getElementById("intervalAnalysisSummary");
-  const intervalAnalyzeBtn = document.getElementById("intervalAnalyzeBtn");
+  // ===== 同一間隔（グループ）イベント・サムネイル =====
+  const intervalGroupWrapper   = document.getElementById("intervalGroupTableWrapper");
+  const intervalGroupTable     = document.getElementById("intervalGroupTable");
+  const intervalGroupSummary   = document.getElementById("intervalGroupAnalysisSummary");
+  const intervalGroupAnalyzeBtn = document.getElementById("intervalGroupAnalyzeBtn");
 
-  lineSegments.forEach((seg, idx) => {
-    drawObjectLineThumbnail(`iobj_${idx}`, seg, 0.8);
-    drawIntervalPatternsThumbnail(`iall_${idx}`, idx, lineSegments, equalIntervalRelations, 0.8);
-  });
+  if (intervalGroupWrapper && intervalGroupTable && intervalGroupAnalyzeBtn && Array.isArray(cachedEqualIntervalGroups)) {
+    const eqDisplayGroups = cachedEqualIntervalGroups.filter(g => g && Array.isArray(g.pairs) && g.pairs.length > 0);
+    const iTbody = intervalGroupTable.querySelector("tbody");
 
-  iTbody.querySelectorAll("input.irow-toggle").forEach((cb) => {
-    cb.addEventListener("change", (e) => {
-      const tr = e.target.closest("tr");
-      if (!tr) return;
-      if (e.target.checked) tr.classList.remove("hidden-row");
-      else tr.classList.add("hidden-row");
-    });
-  });
-
-  intervalAnalyzeBtn.addEventListener("click", () => {
-    const checkedIdx = [];
-    iTbody.querySelectorAll("input.irow-toggle").forEach((cb) => {
-      if (cb.checked) {
-        const idx = parseInt(cb.dataset.index, 10);
-        if (!Number.isNaN(idx)) checkedIdx.push(idx);
+    // グループごとのサムネイル描画
+    eqDisplayGroups.forEach((g, gIdx) => {
+      const canvas = document.getElementById(`iequalgrp_${gIdx}`);
+      if (canvas) {
+        drawEqualIntervalGroupThumbnail(canvas.id, g, lineSegments, 0.9);
       }
     });
 
-    const total = checkedIdx.length;
-    if (total === 0) {
-      intervalSummaryDiv.textContent = "チェックされた線分がありません。 / No line segments are checked.";
-      return;
+    // 行表示 ON/OFF
+    if (iTbody) {
+      iTbody.querySelectorAll("input.igrp-row-toggle").forEach((cb) => {
+        cb.addEventListener("change", () => {
+          const row = cb.closest("tr");
+          if (!row) return;
+          if (cb.checked) row.classList.remove("hidden-row");
+          else row.classList.add("hidden-row");
+        });
+      });
     }
 
-    const checkedSet = new Set(checkedIdx);
-    let successInterval = 0;
+    // ★ 割合を分析：グループ単位でチェックされたもののうち
+    //    「同一間隔ペアが2つ以上あるグループ」に含まれる線分の割合
+    intervalGroupAnalyzeBtn.addEventListener("click", () => {
+        if (!iTbody) return;
 
-    for (const i of checkedIdx) {
-      const er = equalIntervalRelations[i];
-      if (!er || !er.matchedEqual) continue;
-      if (er.matchedEqual.some((j) => j !== i && checkedSet.has(j))) {
-        successInterval++;
-      }
-    }
+        // チェックされたグループのインデックスを取得
+        const checkedGroupIdx = [];
+        iTbody.querySelectorAll("input.igrp-row-toggle").forEach((cb) => {
+            if (cb.checked) {
+                const idx = parseInt(cb.dataset.gidx, 10);
+                if (!Number.isNaN(idx)) checkedGroupIdx.push(idx);
+            }
+        });
 
-    const pct = (num) => ((num / total) * 100).toFixed(1);
-    intervalSummaryDiv.innerHTML =
-      `チェックされた線分数 / Checked segments: ${total}<br>` +
-      `同一間隔パターンの相手を持つ線分 / Segments with equal-interval match: ${successInterval}/${total} (${pct(successInterval)}%)`;
-  });
+        if (checkedGroupIdx.length === 0) {
+            intervalGroupSummary.textContent =
+                "チェックされたグループがありません / No groups are checked.";
+            return;
+        }
 
-  const intervalDownloadBtn = document.getElementById("downloadIntervalExcel");
-  if (intervalDownloadBtn) {
-    intervalDownloadBtn.addEventListener("click", () => {
-      exportIntervalExcel(lineSegments, equalIntervalRelations);
+        const eqDisplay = eqDisplayGroups;
+
+        // 「同一間隔ペアが2つ以上あるグループ」に属する線分だけを集計
+        const segSet = new Set();
+        let qualifiedGroupCount = 0;
+
+        checkedGroupIdx.forEach((gIdx) => {
+            const g = eqDisplay[gIdx];
+            if (!g || !Array.isArray(g.pairs)) return;
+
+            // ★ ペアが2つ未満のグループは、割合計算の分子には寄与させない
+            if (g.pairs.length < 2) return;
+
+            qualifiedGroupCount++;
+
+            g.pairs.forEach((p) => {
+                if (p && typeof p.a === "number") segSet.add(p.a);
+                if (p && typeof p.b === "number") segSet.add(p.b);
+            });
+        });
+
+        const usedCount = segSet.size;
+        const totalSegments = lineSegments.length;
+        const ratio = totalSegments > 0 ? (usedCount / totalSegments) * 100 : 0;
+
+        // 表示文言も、「2ペア以上のグループ」に揃えておく
+        intervalGroupSummary.innerHTML =
+            `チェックされたグループ数: ${checkedGroupIdx.length}<br>` +
+            `うち、同一間隔ペアが2つ以上あるグループ数: ${qualifiedGroupCount}<br>` +
+            `同一間隔ペアが2つ以上あるグループに含まれる線分数: ${usedCount}<br>` +
+            `線分総数: ${totalSegments}<br>` +
+            `同一間隔に関与する線分の割合: ${ratio.toFixed(1)}%`;
     });
   }
 
-  // ===== 平行線比率テーブル関連 =====
-  const rTable = document.getElementById("ratioTable");
-  const rTbody = rTable.querySelector("tbody");
-  const ratioSummaryDiv = document.getElementById("ratioAnalysisSummary");
-  const ratioAnalyzeBtn = document.getElementById("ratioAnalyzeBtn");
+  // ===== 平行線比率（パターン）イベント・サムネイル =====
+  const ratioPatternWrapper    = document.getElementById("ratioPatternTableWrapper");
+  const ratioPatternTable      = document.getElementById("ratioPatternTable");
+  const ratioPatternSummary    = document.getElementById("ratioPatternAnalysisSummary");
+  // ★ ここを必ず ratioGroupAnalyzeBtn にする（後述）
+  const ratioPatternAnalyzeBtn = document.getElementById("ratioGroupAnalyzeBtn");
 
-  lineSegments.forEach((seg, idx) => {
-    drawObjectLineThumbnail(`robj_${idx}`, seg, 0.8);
-    drawRatioPatternsThumbnail(`rall_${idx}`, idx, lineSegments, ratioRelations, 0.8);
-  });
+  if (
+    ratioPatternWrapper &&
+    ratioPatternTable &&
+    ratioPatternAnalyzeBtn &&
+    Array.isArray(cachedRatioPatterns)
+  ) {
+    const patterns = cachedRatioPatterns.slice();
+    const rTbody = ratioPatternTable.querySelector("tbody");
 
-  rTbody.querySelectorAll("input.rrow-toggle").forEach((cb) => {
-    cb.addEventListener("change", (e) => {
-      const tr = e.target.closest("tr");
-      if (!tr) return;
-      if (e.target.checked) tr.classList.remove("hidden-row");
-      else tr.classList.add("hidden-row");
-    });
-  });
-
-  ratioAnalyzeBtn.addEventListener("click", () => {
-    const checkedIdx = [];
-    rTbody.querySelectorAll("input.rrow-toggle").forEach((cb) => {
-      if (cb.checked) {
-        const idx = parseInt(cb.dataset.index, 10);
-        if (!Number.isNaN(idx)) checkedIdx.push(idx);
+    // パターンごとのサムネイル描画
+    patterns.forEach((p, pIdx) => {
+      const canvas = document.getElementById(`rratio_${pIdx}`);
+      if (canvas) {
+        // パターンオブジェクトそのものを渡す
+        drawRatioPatternThumbnail(canvas.id, p, lineSegments, 0.9);
       }
     });
 
-    const total = checkedIdx.length;
-    if (total === 0) {
-      ratioSummaryDiv.textContent = "チェックされた線分がありません。 / No line segments are checked.";
-      return;
+    // 行表示 ON/OFF
+    if (rTbody) {
+      rTbody.querySelectorAll("input.rpattern-row-toggle").forEach((cb) => {
+        cb.addEventListener("change", () => {
+          const row = cb.closest("tr");
+          if (!row) return;
+          if (cb.checked) row.classList.remove("hidden-row");
+          else row.classList.add("hidden-row");
+        });
+      });
     }
 
-    const checkedSet = new Set(checkedIdx);
-    let successRatio = 0;
+    // ★ 割合を分析：
+    //    ・チェックされたパターンのうち、
+    //      「3本組(triplet)に対して比率に合致する追加線分(extras)が1本以上あるもの」だけを対象にする
+    //    ・その3本組＋追加線分に属する線分インデックスを重複なしで集計し、
+    //      線分総数に対する割合を計算する
+    ratioPatternAnalyzeBtn.addEventListener("click", () => {
+      if (!rTbody) return;
 
-    for (const i of checkedIdx) {
-      const rr = ratioRelations[i];
-      if (!rr || !rr.matchedRatio) continue;
-      if (rr.matchedRatio.some((j) => j !== i && checkedSet.has(j))) {
-        successRatio++;
+      const checkedPIdx = [];
+      rTbody.querySelectorAll("input.rpattern-row-toggle").forEach((cb) => {
+        if (cb.checked) {
+          const idx = parseInt(cb.dataset.pidx, 10);
+          if (!Number.isNaN(idx)) checkedPIdx.push(idx);
+        }
+      });
+
+      if (checkedPIdx.length === 0) {
+        ratioPatternSummary.textContent =
+          "チェックされたパターンがありません / No patterns are checked.";
+        return;
       }
-    }
 
-    const pct = (num) => ((num / total) * 100).toFixed(1);
-    ratioSummaryDiv.innerHTML =
-      `チェックされた線分数 / Checked segments: ${total}<br>` +
-      `比率パターンの相手を持つ線分 / Segments with ratio match: ${successRatio}/${total} (${pct(successRatio)}%)`;
-  });
+      const usedSeg = new Set();
+      let validPatternCount = 0;
 
-  const ratioDownloadBtn = document.getElementById("downloadRatioExcel");
-  if (ratioDownloadBtn) {
-    ratioDownloadBtn.addEventListener("click", () => {
-      exportRatioExcel(lineSegments, ratioRelations);
+      checkedPIdx.forEach((pi) => {
+        const p = patterns[pi];
+        if (!p) return;
+
+        const triplet = Array.isArray(p.triplet) ? p.triplet : [];
+        const extras  = Array.isArray(p.extras)  ? p.extras  : [];
+
+        // 「比率に合致する他の線分」が存在しないパターンは対象外
+        if (extras.length === 0) {
+          return;
+        }
+
+        validPatternCount += 1;
+
+        triplet.forEach((idx) => {
+          if (typeof idx === "number") usedSeg.add(idx);
+        });
+        extras.forEach((idx) => {
+          if (typeof idx === "number") usedSeg.add(idx);
+        });
+      });
+
+      const usedCount = usedSeg.size;
+      const totalSegments = lineSegments.length;
+      const ratio = totalSegments > 0 ? (usedCount / totalSegments) * 100 : 0;
+
+      ratioPatternSummary.innerHTML =
+        `チェックされたパターン数: ${checkedPIdx.length}<br>` +
+        `比率条件を満たし追加線分が存在する3本組の数: ${validPatternCount}<br>` +
+        `これらの3本組と追加線分に属する線分数（重複なし）: ${usedCount}<br>` +
+        `線分総数: ${totalSegments}<br>` +
+        `線分総数に対する割合: ${ratio.toFixed(1)}%`;
     });
   }
 }
@@ -3065,6 +3128,159 @@ function exportRatioExcel(lineSegments, ratioRelations) {
   downloadWorkbook(workbook, "ratio_result.xlsx");
 }
 
+// =============================
+// 同一間隔・平行比率(パターン) Excel 出力
+// =============================
+
+/**
+ * 任意の <table>（最終列がサムネイル列）を、
+ * 画面表示と同じヘッダ・テキスト・サムネイル画像付きで Excel に書き出す共通関数
+ *
+ * @param {string} filename           ダウンロードするファイル名
+ * @param {string} sheetName          シート名
+ * @param {string} tableId            対象となる <table> の id
+ * @param {number} imageColIndex1Based サムネイル列の 1 始まりインデックス（例: 6列目なら 6）
+ */
+function exportTableWithCanvasToExcel(
+  filename,
+  sheetName,
+  tableId,
+  imageColIndex1Based
+) {
+  if (!ensureExcelJS()) return;
+
+  const table = document.getElementById(tableId);
+  if (!table) {
+    alert(`エクセル出力対象のテーブルが見つかりません: ${tableId}`);
+    return;
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet(sheetName);
+
+  // ---- ヘッダ行 ----
+  const theadRow = table.querySelector("thead tr");
+  let headerCount = 0;
+  if (theadRow) {
+    const headers = [];
+    theadRow.querySelectorAll("th").forEach((th) => {
+      headers.push(th.textContent.trim());
+    });
+    headerCount = headers.length;
+    if (headers.length > 0) {
+      sheet.addRow(headers);
+    }
+  }
+
+  // 念のため imageColIndex1Based がヘッダ列数を超えていれば補正
+  if (headerCount > 0 && imageColIndex1Based > headerCount) {
+    imageColIndex1Based = headerCount;
+  }
+
+  // ---- 本文行 ----
+  const tbodyRows = table.querySelectorAll("tbody tr");
+  let maxImgWidthPx = 0;
+
+  tbodyRows.forEach((tr) => {
+    const cells = tr.querySelectorAll("td");
+    const rowValues = [];
+    let rowHeightPx = 0;
+
+    cells.forEach((td, colIdx) => {
+      const canvas = td.querySelector("canvas");
+      if (canvas) {
+        // 画像列 → セル文字列は空にしておく
+        rowValues.push("");
+      } else {
+        rowValues.push(td.textContent.trim());
+      }
+    });
+
+    const row = sheet.addRow(rowValues);
+    const rowNumber = row.number; // Excel 上は 1 始まり
+
+    // 行内の canvas（サムネイル）は 1 枚だけの想定
+    const canvas = tr.querySelector("canvas");
+    if (canvas) {
+      const dataURL = canvas.toDataURL("image/png");
+      const base64 = dataURL.split(",")[1];
+      const imgId = workbook.addImage({
+        base64,
+        extension: "png",
+      });
+
+      // imageColIndex1Based 列に貼り付け（0 始まりで指定する必要がある）
+      sheet.addImage(imgId, {
+        tl: { col: imageColIndex1Based - 1, row: rowNumber - 1 },
+        ext: { width: canvas.width, height: canvas.height },
+      });
+
+      rowHeightPx = Math.max(rowHeightPx, canvas.height);
+      maxImgWidthPx = Math.max(maxImgWidthPx, canvas.width);
+    }
+
+    if (rowHeightPx > 0) {
+      const excelRow = sheet.getRow(rowNumber);
+      const needed = pxToRowHeight(rowHeightPx);
+      if (!excelRow.height || excelRow.height < needed) {
+        excelRow.height = needed;
+      }
+    }
+  });
+
+  // 画像列の幅をサムネイルに合わせて調整
+  if (maxImgWidthPx > 0 && imageColIndex1Based > 0) {
+    sheet.getColumn(imageColIndex1Based).width = pxToColWidth(maxImgWidthPx);
+  }
+
+  downloadWorkbook(workbook, filename);
+}
+
+// 同一間隔グループの分析結果
+//   → #intervalGroupTable （最終列がサムネイル列 iequalgrp_*）をそのまま出力
+function exportEqualIntervalExcelFromCache() {
+  exportTableWithCanvasToExcel(
+    "equal_interval_result.xlsx", // ファイル名
+    "EqualInterval",              // シート名
+    "intervalGroupTable",         // table id
+    6                             // サムネイル列: ヘッダ 6 列目が canvas 列
+  );
+}
+
+// 平行線比率パターンの分析結果
+//   → #ratioPatternTable （最終列がサムネイル列 rratio_*）をそのまま出力
+function exportRatioPatternExcelFromCache() {
+  exportTableWithCanvasToExcel(
+    "ratio_pattern_result.xlsx",  // ファイル名
+    "RatioPattern",               // シート名
+    "ratioPatternTable",          // table id
+    6                             // サムネイル列: ヘッダ 6 列目が canvas 列
+  );
+}
+
+// =============================
+// ボタンクリックに紐づけ (イベントデリゲーション)
+// =============================
+
+document.addEventListener("click", (ev) => {
+  const target = ev.target;
+  if (!(target instanceof HTMLElement)) return;
+
+  // 同一間隔グループの分析結果 → Excel
+  if (target.id === "downloadIntervalExcel") {
+    ev.preventDefault();
+    exportEqualIntervalExcelFromCache();
+    return;
+  }
+
+  // 平行線比率(パターン)の分析結果 → Excel
+  if (target.id === "downloadRatioExcel") {
+    ev.preventDefault();
+    exportRatioPatternExcelFromCache();
+    return;
+  }
+});
+
 /* ======================= ここまで Excel 出力関連 ======================= */
 
 // ===== サムネイル用ヘルパー =====
@@ -3426,14 +3642,24 @@ function drawIntervalPatternsThumbnail(
   ctx.lineTo(seg.x2 * s, seg.y2 * s);
   ctx.stroke();
 
+  // 評価線分の中点（画像座標）
   const baseMid = [
     (seg.x1 + seg.x2) / 2.0,
     (seg.y1 + seg.y2) / 2.0,
   ];
 
-  // 他線分（オレンジ）＋中間点に青丸
+  const matched = rel.matchedEqual || [];
+  if (matched.length === 0) {
+    // 同一間隔の相手がいない場合は何も描かない（行としては存在していて OK）
+    return;
+  }
+
+  // 他線分の中点を保持しておく（画像座標）
+  const mids = [];
+
+  // 他線分（オレンジ）＋各線分の中点（参考表示）
   ctx.lineWidth = 2;
-  for (const j of rel.matchedEqual || []) {
+  for (const j of matched) {
     const sj = lineSegments[j];
 
     // オレンジ線
@@ -3443,20 +3669,51 @@ function drawIntervalPatternsThumbnail(
     ctx.lineTo(sj.x2 * s, sj.y2 * s);
     ctx.stroke();
 
-    // 中間点（between midpoints）に青い小さな丸
+    // この線分自身の中点（画像座標）
     const midJ = [(sj.x1 + sj.x2) / 2.0, (sj.y1 + sj.y2) / 2.0];
-    const between = [
-      (baseMid[0] + midJ[0]) / 2.0,
-      (baseMid[1] + midJ[1]) / 2.0,
+    mids.push({ idx: j, x: midJ[0], y: midJ[1] });
+
+    // （任意）中点そのものを薄く打っておきたい場合はここで打つことも可能
+    // 今回は Python 版のイメージに合わせ、基準点は「間の点」に集約する。
+  }
+
+  // 青い点の描画
+  ctx.fillStyle = "rgb(0,0,255)";
+
+  // 1) 評価線分 x と各相手線分との「間の点」
+  for (const m of mids) {
+    const betweenBase = [
+      (baseMid[0] + m.x) / 2.0,
+      (baseMid[1] + m.y) / 2.0,
     ];
+    const bx = betweenBase[0] * s;
+    const by = betweenBase[1] * s;
 
-    const bx = between[0] * s;
-    const by = between[1] * s;
-
-    ctx.fillStyle = "rgb(0,0,255)";
     ctx.beginPath();
     ctx.arc(bx, by, 2.0, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  // 2) 相手線分同士のペア (A–B, B–C, …) の「間の点」
+  //    → 例えば、x–A と B–C が同じ間隔になっている場合、
+  //       A–B, B–C などの構造も見えるように中点を打つ。
+  const n = mids.length;
+  for (let a = 0; a < n; a++) {
+    for (let b = a + 1; b < n; b++) {
+      const ma = mids[a];
+      const mb = mids[b];
+
+      const betweenAB = [
+        (ma.x + mb.x) / 2.0,
+        (ma.y + mb.y) / 2.0,
+      ];
+      const bx = betweenAB[0] * s;
+      const by = betweenAB[1] * s;
+
+      ctx.beginPath();
+      ctx.arc(bx, by, 2.0, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 
@@ -3498,6 +3755,188 @@ function drawRatioPatternsThumbnail(
     ctx.stroke();
   }
 }
+
+// === Equal-interval group thumbnail ===
+//  元画像を背景にして、その上に「同一間隔」の線分と○印を描画する
+function drawEqualIntervalGroupThumbnail(canvasId, group, lineSegments, scale = 0.9) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !group) return;
+
+  // まず元画像をキャンバスに描画（共通ヘルパー）
+  const base = drawBaseThumbnailToCanvas(canvas, scale);
+  const ctx = base.ctx;
+  const s = base.scale;
+  if (!ctx) return;
+
+  if (!Array.isArray(group.pairs) || group.pairs.length === 0) return;
+
+  // グループ内に含まれる線分インデックスを集約
+  const segIdxSet = new Set();
+  for (const p of group.pairs) {
+    if (!p) continue;
+    if (typeof p.a === "number") segIdxSet.add(p.a);
+    if (typeof p.b === "number") segIdxSet.add(p.b);
+  }
+
+  // 1) 線分を緑で描画
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgb(0, 180, 0)";
+  for (const idx of segIdxSet) {
+    const seg = lineSegments[idx];
+    if (!seg) continue;
+
+    ctx.beginPath();
+    ctx.moveTo(seg.x1 * s, seg.y1 * s);
+    ctx.lineTo(seg.x2 * s, seg.y2 * s);
+    ctx.stroke();
+  }
+
+  // 2) 「間隔の間」に ○印を描画（青）
+  ctx.fillStyle = "rgb(0, 0, 255)";
+  const r = 3;
+
+  for (const pair of group.pairs) {
+    if (!pair) continue;
+    const ia = pair.a;
+    const ib = pair.b;
+    if (typeof ia !== "number" || typeof ib !== "number") continue;
+
+    const segA = lineSegments[ia];
+    const segB = lineSegments[ib];
+    if (!segA || !segB) continue;
+
+    // 各線分の中点
+    const midAx = (segA.x1 + segA.x2) / 2.0;
+    const midAy = (segA.y1 + segA.y2) / 2.0;
+    const midBx = (segB.x1 + segB.x2) / 2.0;
+    const midBy = (segB.y1 + segB.y2) / 2.0;
+
+    // 2本の中点のちょうど真ん中 = 「間隔の間」の代表点
+    const cxImg = (midAx + midBx) / 2.0;
+    const cyImg = (midAy + midBy) / 2.0;
+
+    const cx = cxImg * s;
+    const cy = cyImg * s;
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// === 平行比率パターン用サムネイル ===
+// pattern.triplet: [iA, iB, iC] （lineSegments のインデックス）
+// pattern.extras : 追加でマッチした線分インデックス配列（あれば）
+function drawRatioPatternThumbnail(canvasId, pattern, lineSegments, scale = 0.9) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  if (!originalImage) return;
+  if (!pattern || !Array.isArray(pattern.triplet) || pattern.triplet.length !== 3) return;
+
+  // まず元画像をキャンバスに描画（他分析と同じ方式）
+  const base = drawBaseThumbnailToCanvas(canvas, scale);
+  const ctx  = base.ctx;
+  const s    = base.scale;
+  if (!ctx) return;
+
+  const triplet = pattern.triplet;                        // [idxA, idxB, idxC]
+  const extras  = Array.isArray(pattern.extras) ? pattern.extras : [];
+
+  const idxA = triplet[0];
+  const idxB = triplet[1];
+  const idxC = triplet[2];
+
+  const A = lineSegments[idxA];
+  const B = lineSegments[idxB];
+  const C = lineSegments[idxC];
+  if (!A || !B || !C) return;
+
+  // 元画像サイズ（法線の長さ決めに使う）
+  const imgW = originalImage.cols;
+  const imgH = originalImage.rows;
+  const LONG = Math.max(imgW, imgH) * 2.0;
+
+  // 線分描画のヘルパー（元画像座標 -> サムネイル座標）
+  function drawSegment(seg, color, width) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = width;
+    ctx.beginPath();
+    ctx.moveTo(seg.x1 * s, seg.y1 * s);
+    ctx.lineTo(seg.x2 * s, seg.y2 * s);
+    ctx.stroke();
+  }
+
+  // ★ 1) A/B/C と extras を緑で描画
+  drawSegment(A, "rgb(0,255,0)", 2);
+  drawSegment(B, "rgb(0,255,0)", 2);
+  drawSegment(C, "rgb(0,255,0)", 2);
+
+  for (const idx of extras) {
+    const seg = lineSegments[idx];
+    if (!seg) continue;
+    drawSegment(seg, "rgb(0,255,0)", 1);
+  }
+
+  // ---- ここから「比率の間隔を示す青い法線」 ----
+
+  // B の中点
+  const midBx = (B.x1 + B.x2) / 2.0;
+  const midBy = (B.y1 + B.y2) / 2.0;
+
+  // B の方向ベクトルと法線ベクトル
+  const vx = B.x2 - B.x1;
+  const vy = B.y2 - B.y1;
+  const len = Math.hypot(vx, vy);
+  if (len < 1e-6) return;
+
+  // 単位法線（Python版と同様に B に直交する方向）
+  const nx = -vy / len;
+  const ny =  vx / len;
+
+  // 画像全体をざっくり跨ぐ長さで法線を引く
+  const n1x = midBx - nx * LONG;
+  const n1y = midBy - ny * LONG;
+  const n2x = midBx + nx * LONG;
+  const n2y = midBy + ny * LONG;
+
+  ctx.strokeStyle = "rgb(0,0,255)";  // 青い法線
+  ctx.lineWidth   = 1;
+  ctx.beginPath();
+  ctx.moveTo(n1x * s, n1y * s);
+  ctx.lineTo(n2x * s, n2y * s);
+  ctx.stroke();
+
+  // 無限直線同士の交点を求めるヘルパー
+  function intersectInfiniteLines(x1, y1, x2, y2, x3, y3, x4, y4) {
+    const r1x = x2 - x1;
+    const r1y = y2 - y1;
+    const r2x = x4 - x3;
+    const r2y = y4 - y3;
+    const denom = r1x * r2y - r1y * r2x;
+    if (Math.abs(denom) < 1e-8) return null;
+    const t = ((x3 - x1) * r2y - (y3 - y1) * r2x) / denom;
+    return { x: x1 + t * r1x, y: y1 + t * r1y };
+  }
+
+  // 法線と A/B/C の交点（＝比率を測っている「間隔」上の点）を青い小円で描画
+  const pts = [];
+
+  const iA = intersectInfiniteLines(n1x, n1y, n2x, n2y, A.x1, A.y1, A.x2, A.y2);
+  if (iA) pts.push(iA);
+  const iB = intersectInfiniteLines(n1x, n1y, n2x, n2y, B.x1, B.y1, B.x2, B.y2);
+  if (iB) pts.push(iB);
+  const iC = intersectInfiniteLines(n1x, n1y, n2x, n2y, C.x1, C.y1, C.x2, C.y2);
+  if (iC) pts.push(iC);
+
+  ctx.fillStyle = "rgb(0,0,255)";
+  const r = 3;
+  for (const p of pts) {
+    ctx.beginPath();
+    ctx.arc(p.x * s, p.y * s, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 
 // ===== 閾値パネルと再分析ボタンの処理 =====
 function initThresholdInputs() {

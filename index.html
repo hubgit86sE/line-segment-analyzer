@@ -363,7 +363,9 @@
     #tableWrapper,
     #parallelTableWrapper,
     #intervalTableWrapper,
-    #ratioTableWrapper {
+    #intervalGroupTableWrapper,
+    #ratioTableWrapper,
+    #ratioPatternTableWrapper {
       max-height: 450px;
       overflow-y: auto;
       overflow-x: auto;
@@ -378,14 +380,18 @@
     #tableWrapper table,
     #parallelTableWrapper table,
     #intervalTableWrapper table,
-    #ratioTableWrapper table {
+    #intervalGroupTableWrapper table,
+    #ratioTableWrapper table,
+    #ratioPatternTableWrapper table {
       width: max-content;
     }
 
     #tableWrapper thead th,
     #parallelTableWrapper thead th,
     #intervalTableWrapper thead th,
-    #ratioTableWrapper thead th {
+    #intervalGroupTableWrapper thead th,
+    #ratioTableWrapper thead th,
+    #ratioPatternTableWrapper thead th {
       position: sticky;
       top: 0;
       background: #f0f0f0;
@@ -403,26 +409,25 @@
   <section id="introSection">
     <div id="introInner">
       <div id="introText">
-        <div id="introBadge">
-          <span id="introBadgeDot"></span>
-          Line Geometry Analyzer
-        </div>
-
         <!-- 題目：日英連続・同じ大きさ・太字 -->
         <h1 id="introTitle">線分解析ツール&nbsp;Line Segment Analyzer</h1>
 
         <!-- 説明文：日英併記＋文毎に改行 -->
         <p>
-          本ツールは画像内の線分の位置、角度、長さが美的とされた理由を分析するための解析ツールです。<br>
-          This tool analyzes why the positions, angles, and lengths of line segments in an image are judged to be aesthetically pleasing.<br><br>
-          Kantの『判断力批判』に基づき、美的判断の本質的要件としての事物に恣意的に要求された何らかの「あるべくしてある」
-          （本ツールでは延長、平行、同一間隔、比率への一致）に該当するかどうかを解析します。<br>
-          Drawing on Kant’s Critique of the Power of Judgment, it analyzes whether a given configuration satisfies some arbitrarily
-          demanded “being as it ought to be” as an essential requirement of aesthetic judgment—here operationalized as alignment
-          with extensions, parallels, equal intervals, and ratios.<br><br>
-          絵画、建築物、自動車、その他産業製品等、「芸術家はそこに線を合わせたのか」ということをご発見いただけると思います。<br>
-          It is intended to help you discover, in paintings, architecture, automobiles, and other industrial products,
-          whether—and where—“the artist intentionally aligned lines there.”
+                本ツールは画像内の線分の位置、角度、長さが美的とされた理由を分析するための解析ツールです。
+                本ツールにおける美的(倫理的)判断の本質は、事物に対して絶対性/普遍性("it must be x")を要求することそのものとします。依拠はKantの『判断力批判』です。<br>
+                何にどのような内容の絶対性/普遍性を要求するかは恣意的であり、"it"にも"x"にも「絶対的/普遍的でないこと」すら含め何でも入力可能です。
+                このため「何があるべきか」つまり美の内容は具体的対象によって定義できず、主観は自由であるため物理指標化は困難です。<br>
+                一方で物理的事象については、個々人がそれを恣意的に受容するかどうかとは別の問題として、例えば「線の関係に絶対性/普遍性があるか」を調べることで、美的要件の存在を解析可能です。<br>
+                本ツールでは、美的要件としての絶対性/普遍性の物理事象における一例として、延長、平行、同一間隔、比率への一致を解析します。
+                絵画、建築物、自動車、その他産業製品等、芸術家やデザイナーがどこに線を合わせたのかをご覧いただけましたら幸いです。<br><br>
+                This tool analyzes why the positions, angles, and lengths of line segments in an image may be regarded as aesthetically meaningful.
+                Here, the essence of aesthetic (ethical) judgment is taken to be the very act of demanding some form of necessity or universality ("it must be x") from objects; this follows Kant’s Critique of Judgment.<br>
+                What is demanded, and to what object, is arbitrary—both “it” and “x” may include even the negation of necessity/universality.
+                Accordingly, the content of “what ought to be” cannot be defined by concrete objects, and subjective variability makes physical quantification difficult.<br>
+                However, regarding physical configurations, and abstracting from whether individuals happen to accept them, one may examine whether relations among lines exhibit necessity/universality, which enables aesthetic requirements to be analyzed in physical terms.<br>
+                This tool operationalizes such requirements through extensions, parallels, equal intervals, and ratios.
+                It allows observation—across paintings, architecture, automobiles, and industrial products—of where artists or designers may have deliberately aligned lines.
         </p>
       </div>
 
