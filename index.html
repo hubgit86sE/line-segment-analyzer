@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>線分解析ツール / Line Segment Analyzer</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      color: #1f2933;
+      box-sizing: border-box;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    *, *::before, *::after { box-sizing: inherit; }
+
+    /* ------------- 冒頭の説明セクション ------------- */
+    #introSection {
+      padding: 14px 24px;  /* 縦の余白少し控えめ */
+      border-bottom: 1px solid #111827;
+      background: #111827; /* 黒に近いグレー */
+    }
+
+    #introInner {
+      display: flex;
+      align-items: flex-start;
+      gap: 24px;
+      /* 左寄せ（左パネルの真上に来るイメージ） */
+    }
+
+    #introText {
+      flex: 1;
+      min-width: 0;
+      text-align: left;
+      color: #e5e7eb;
+    }
+
+    #introBadge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background-color: rgba(255, 255, 255, 0.10);
+      color: #f9fafb;
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    #introBadgeDot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background-color: #f9fafb;
+    }
+
+    /* 題目（日英一行） */
+    #introTitle {
+      margin: 0 0 8px;
+      font-size: 22px;
+      font-weight: 650;
+      color: #ffffff;
+    }
+
+    #introText p {
+      margin: 6px 0;
+      line-height: 1.7;
+      font-size: 13px;
+      color: #e5e7eb;
+      text-align: left;
+    }
+
+    #introText p strong {
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    /* ------------- サンプル画像の横スクロールエリア ------------- */
+    #introImageWrapper {
+      position: relative;
+      flex: 0 0 380px;        /* 表示幅を少し広げる */
+      background-color: #ffffff;
+      border-radius: 14px;
+      padding: 2px 32px;      /* ← 縦方向の余白をさらに狭く */
+      box-shadow: 0 10px 20px rgba(15, 23, 42, 0.20);
+      border: 1px solid #e5e7eb;
+      overflow: hidden;
+    }
+
+    #introImageWrapper .introCarousel {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scroll-behavior: smooth;
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    #introImageWrapper .introCarousel::-webkit-scrollbar {
+      display: none;
+    }
+
+    #introImageWrapper .introItem {
+      flex: 0 0 auto;
+      width: 300px;        /* 1枚あたりを少し広げる */
+      text-align: center;
+    }
+
+    #introImageWrapper .introItem img {
+      display: block;
+      margin: 0 auto;
+      height: 180px;       /* 高さを統一 */
+      max-width: 100%;
+      width: auto;
+      border-radius: 10px;
+      object-fit: contain;
+      background-color: #f9fafb;
+    }
+
+    #introImageWrapper .introItem figcaption {
+      margin-top: 4px;
+      font-size: 11px;
+      color: #4b5563;
+      line-height: 1.5;
+      letter-spacing: 0.01em;
+    }
+
+    .introNav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 22px;
+      height: 32px;
+      border: none;
+      border-radius: 999px;
+      background-color: rgba(17, 24, 39, 0.12);
+      color: #f9fafb;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      outline: none;
+      transition: background-color 0.15s ease, transform 0.05s ease;
+    }
+
+    .introNav:hover {
+      background-color: rgba(17, 24, 39, 0.22);
+      transform: translateY(-50%) translateX(0);
+    }
+
+    .introNav:active {
+      background-color: rgba(17, 24, 39, 0.30);
+    }
+
+    .introNav:focus-visible {
+      outline: 2px solid #e5e7eb;
+      outline-offset: 1px;
+    }
+
+    .introPrev { left: 6px; }
+    .introNext { right: 6px; }
+
+    /* ------------- 下部：ツール本体（左右2ペイン） ------------- */
+    #appContainer {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    #leftPanel {
+      width: clamp(340px, 38vw, 340px);
+      padding: 10px;
+      border-right: 1px solid #e5e7eb;
+      overflow-y: auto;
+      background-color: #f9fafb;
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    #leftPanel::-webkit-scrollbar {
+      width: 0;
+      height: 0;
+    }
+
+    #leftPanel h2 {
+      margin: 0 0 8px;
+      font-size: 15px;
+      font-weight: 600;
+      color: #111827;
+      text-align: left;
+    }
+
+    #rightPanel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 8px;
+      overflow-y: auto;
+      overflow-x: auto;
+      background-color: #f3f4f6;
+    }
+
+    #topArea {
+      display: flex;
+      align-items: center;
+      margin: 4px 0 4px;
+      gap: 6px;
+      color: #374151;
+      font-size: 13px;
+    }
+
+    #canvasWrapper {
+      width: 100%;
+      max-width: 280px;
+      margin: 4px auto 6px;
+      display: block;
+      overflow: visible;
+      border-radius: 1px;
+      background: #ffffff;
+    }
+
+    #canvas {
+      max-width: 100%;
+      max-height: 100%;
+      width: auto;
+      height: auto;
+      display: block;
+      border: 1px solid #d1d5db;
+      box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
+      background-color: #ffffff;
+    }
+
+    #canvasHint {
+      max-width: 280px;
+      margin: 0 auto 6px;
+      font-size: 11px;
+      line-height: 1.4;
+      color: #6b7280;
+      text-align: left;
+    }
+
+    #result {
+      flex: 1;
+      border: 1px solid #d1d5db;
+      padding: 1px;
+      background-color: #ffffff;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #111827;
+    }
+
+    #thresholdPanel label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+      color: #374151;
+      text-align: left;
+    }
+
+    #thresholdPanel input[type="number"] {
+      margin-left: 4px;
+      padding: 2px 4px;
+      font-size: 12px;
+      border-radius: 4px;
+      border: 1px solid #d1d5db;
+      width: 110px;
+    }
+
+    #thresholdPanel fieldset {
+      margin-bottom: 10px;
+      padding: 8px 10px 10px;
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      background-color: #ffffff;
+    }
+
+    #thresholdPanel legend {
+      font-weight: 600;
+      font-size: 12px;
+      color: #2563eb;
+    }
+
+    #reanalyzeBtn {
+      margin-top: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: none;
+      background: linear-gradient(135deg, #2563eb, #4f46e5);
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 500;
+      box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
+      cursor: pointer;
+      transition: transform 0.05s ease-out,
+                  box-shadow 0.1s ease-out,
+                  opacity 0.1s ease-out;
+    }
+
+    #reanalyzeBtn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 14px rgba(37, 99, 235, 0.4);
+      opacity: 0.97;
+    }
+
+    #reanalyzeBtn:active {
+      transform: translateY(0);
+      box-shadow: 0 2px 6px rgba(37, 99, 235, 0.35);
+      opacity: 0.9;
+    }
+
+    #reanalyzeStatus {
+      margin-left: 8px;
+      font-size: 12px;
+      color: #006400;
+    }
+
+    table {
+      border-collapse: collapse;
+      font-size: 12px;
+      table-layout: fixed;
+      width: 100%;
+    }
+
+    th, td {
+      border: 1px solid #ccc;
+      padding: 2px 4px;
+      text-align: right;
+      vertical-align: top;
+      word-wrap: break-word;
+    }
+
+    th.col-small, td.col-small { width: 50px; }
+
+    th.col-canvas,
+    td.col-canvas {
+      width: 260px !important;
+      min-width: 260px !important;
+      max-width: 260px !important;
+    }
+
+    th.col-obj-canvas,
+    td.col-obj-canvas {
+      width: 260px !important;
+      min-width: 260px !important;
+      max-width: 260px !important;
+    }
+
+    td.col-canvas canvas,
+    td.col-obj-canvas canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    th.col-abc, td.col-abc { width: 60px; }
+    th.col-summary, td.col-summary { width: 100px; }
+
+    #tableWrapper,
+    #parallelTableWrapper,
+    #intervalTableWrapper,
+    #ratioTableWrapper {
+      max-height: 450px;
+      overflow-y: auto;
+      overflow-x: auto;
+      margin-bottom: 8px;
+      border: 1px solid #ddd;
+      background-color: #ffffff;
+      overscroll-behavior-y: none;
+    }
+
+    #rightPanel { overscroll-behavior-y: none; }
+
+    #tableWrapper table,
+    #parallelTableWrapper table,
+    #intervalTableWrapper table,
+    #ratioTableWrapper table {
+      width: max-content;
+    }
+
+    #tableWrapper thead th,
+    #parallelTableWrapper thead th,
+    #intervalTableWrapper thead th,
+    #ratioTableWrapper thead th {
+      position: sticky;
+      top: 0;
+      background: #f0f0f0;
+      z-index: 2;
+    }
+
+    .hidden-row td:not(.keep-visible) { display: none; }
+
+    button { cursor: pointer; }
+  </style>
+</head>
+
+<body>
+  <!-- ① 冒頭の説明ブロック -->
+  <section id="introSection">
+    <div id="introInner">
+      <div id="introText">
+        <div id="introBadge">
+          <span id="introBadgeDot"></span>
+          Line Geometry Analyzer
+        </div>
+
+        <!-- 題目：日英連続・同じ大きさ・太字 -->
+        <h1 id="introTitle">線分解析ツール&nbsp;Line Segment Analyzer</h1>
+
+        <!-- 説明文：日英併記＋文毎に改行 -->
+        <p>
+          本ツールは画像内の線分の位置、角度、長さが美的とされた理由を分析するための解析ツールです。<br>
+          This tool analyzes why the positions, angles, and lengths of line segments in an image are judged to be aesthetically pleasing.<br><br>
+          Kantの『判断力批判』に基づき、美的判断の本質的要件としての事物に恣意的に要求された何らかの「あるべくしてある」
+          （本ツールでは延長、平行、同一間隔、比率への一致）に該当するかどうかを解析します。<br>
+          Drawing on Kant’s Critique of the Power of Judgment, it analyzes whether a given configuration satisfies some arbitrarily
+          demanded “being as it ought to be” as an essential requirement of aesthetic judgment—here operationalized as alignment
+          with extensions, parallels, equal intervals, and ratios.<br><br>
+          絵画、建築物、自動車、その他産業製品等、「芸術家はそこに線を合わせたのか」ということをご発見いただけると思います。<br>
+          It is intended to help you discover, in paintings, architecture, automobiles, and other industrial products,
+          whether—and where—“the artist intentionally aligned lines there.”
+        </p>
+      </div>
+
+      <!-- 横スクロール＋キャプション付きのサンプル画像一覧（◁ ▷ボタンあり） -->
+      <div id="introImageWrapper">
+        <button class="introNav introPrev" type="button" aria-label="Previous sample">◁</button>
+
+        <div class="introCarousel">
+          <figure class="introItem">
+            <img
+              src="img/Gogh_Wheat_Field_with_Cypresses_calculated.png"
+              alt="MET open access Wheat Field with Cypresses の解析結果"
+            />
+            <figcaption>MET open access&nbsp;Wheat Field with Cypresses</figcaption>
+          </figure>
+
+          <figure class="introItem">
+            <img
+              src="img/Hokusai_Under_the_Wave_off_Kanagawa_calculated.png"
+              alt="MET open access Under the Wave off Kanagawa の解析結果"
+            />
+            <figcaption>MET open access&nbsp;Under the Wave off Kanagawa</figcaption>
+          </figure>
+
+          <figure class="introItem">
+            <img
+              src="img/Road_Wagon_706_calculated.png"
+              alt="MET open access Road Wagon の解析結果"
+            />
+            <figcaption>MET open access&nbsp;Road Wagon</figcaption>
+          </figure>
+        </div>
+
+        <button class="introNav introNext" type="button" aria-label="Next sample">▷</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ② 下部：ツール本体 -->
+  <div id="appContainer">
+    <div id="leftPanel">
+      <h2>閾値調整パネル / Threshold Panel</h2>
+
+      <div id="topArea">
+        <span>解析キャンバス / Analysis Canvas:</span>
+      </div>
+
+      <div id="canvasWrapper">
+        <canvas id="canvas"></canvas>
+      </div>
+
+      <div id="canvasHint">
+        範囲フィルタ編集 / Range Filter Editing:<br>
+        ・節点の削除 … Ctrl + クリック（3点未満にはなりません）<br>
+        &nbsp;&nbsp;Delete vertex … Ctrl + Click (cannot reduce below 3 vertices)<br>
+        ・ポリゴン全体の移動 … ポリゴン内側をドラッグ<br>
+        &nbsp;&nbsp;Move whole polygon … Drag inside the polygon
+      </div>
+
+      <div>
+        <label>
+          画像ファイル / Image file:
+          <input type="file" id="imageInput" accept="image/*">
+        </label>
+      </div>
+
+      <div id="thresholdPanel">
+        <fieldset>
+          <legend>線分抽出 / Line Extraction</legend>
+          <label>
+            最小線分長 (px) / Min line length (px):
+            <input type="number" id="minLineLength" step="1" min="1" value="10">
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>延長（A/B/C 共通）/ Extension (A/B/C Shared)</legend>
+          <label>
+            orth 最大値（A/B/C 共通）/ Max orth (shared):
+            <input type="number" id="extOrthCommon" step="0.1" min="0" value="5.0">
+          </label>
+
+          <input type="number" id="extAorth" step="0.1" value="5.0" style="display:none;">
+          <input type="number" id="extBorth" step="0.1" value="5.0" style="display:none;">
+          <input type="number" id="extCorth" step="0.1" value="5.0" style="display:none;">
+        </fieldset>
+
+        <fieldset>
+          <legend>平行 閾値 / Parallel Thresholds</legend>
+          <label>
+            角度差しきい値 (deg) / Angle diff threshold (deg):
+            <input type="number" id="parallelAngle" step="0.1" min="0" max="90" value="2.0">
+          </label>
+          <label>
+            長手方向オーバーラップ最小割合 / Min overlap ratio:
+            <input type="number" id="parallelInstrip" step="0.01" min="0" max="1" value="0.01">
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>同一間隔 閾値 / Equal-Interval Thresholds</legend>
+          <label>
+            間隔EPS (px) / Interval EPS (px):
+            <input type="number" id="intervalEps" step="0.1" min="0" value="1.0">
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>平行線比率 閾値 / Parallel-Ratio Thresholds</legend>
+          <label>
+            比率点距離EPS (px) / Ratio point distance EPS (px):
+            <input type="number" id="ratioPointEps" step="0.1" min="0" value="3.0">
+          </label>
+        </fieldset>
+
+        <div>
+          <button id="reanalyzeBtn">分析 / 再分析を実行 / Run analysis (apply thresholds)</button>
+          <span id="reanalyzeStatus"></span>
+        </div>
+      </div>
+    </div>
+
+    <div id="rightPanel">
+      <div id="result">
+        OpenCV.js の初期化待ち、または画像を選択してから「分析 / 再分析を実行」ボタンを押すと、
+        ここに分析結果が表示されます。<br>
+        Waiting for OpenCV.js initialization. After selecting an image,
+        press “Run analysis / re-analyze” to show the results here.
+      </div>
+    </div>
+  </div>
+
+  <!-- OpenCV.js -->
+  <script src="libs/opencv.js"></script>
+  <!-- ExcelJS -->
+  <script src="https://cdn.jsdelivr.net/npm/exceljs/dist/exceljs.min.js"></script>
+  <!-- 解析ロジック -->
+  <script src="main.js"></script>
+
+  <!-- orth 共通化のUIラッパ -->
+  <script>
+    (function () {
+      function syncCommonOrthToHidden() {
+        const common = document.getElementById("extOrthCommon");
+        const a = document.getElementById("extAorth");
+        const b = document.getElementById("extBorth");
+        const c = document.getElementById("extCorth");
+        if (!common || !a || !b || !c) return;
+
+        const v = parseFloat(common.value);
+        if (Number.isNaN(v)) return;
+
+        a.value = v;
+        b.value = v;
+        c.value = v;
+      }
+
+      function initCommonOrthFromHidden() {
+        const common = document.getElementById("extOrthCommon");
+        const a = document.getElementById("extAorth");
+        if (!common || !a) return;
+
+        const v = parseFloat(a.value);
+        if (!Number.isNaN(v)) common.value = v;
+      }
+
+      window.addEventListener("DOMContentLoaded", () => {
+        initCommonOrthFromHidden();
+        syncCommonOrthToHidden();
+
+        if (typeof applyThresholdFromUI === "function") {
+          applyThresholdFromUI();
+        }
+
+        const common = document.getElementById("extOrthCommon");
+        if (common) {
+          common.addEventListener("input", syncCommonOrthToHidden);
+          common.addEventListener("change", syncCommonOrthToHidden);
+        }
+      });
+    })();
+  </script>
+
+  <!-- サンプル画像カルーセル ◁ ▷ 操作用スクリプト（中央寄せ＋ループ方向維持） -->
+  <script>
+    (function () {
+      window.addEventListener("DOMContentLoaded", () => {
+        const wrapper = document.getElementById("introImageWrapper");
+        if (!wrapper) return;
+
+        const carousel = wrapper.querySelector(".introCarousel");
+        const prevBtn = wrapper.querySelector(".introPrev");
+        const nextBtn = wrapper.querySelector(".introNext");
+        if (!carousel || !prevBtn || !nextBtn) return;
+
+        const originalItems = Array.from(carousel.querySelectorAll(".introItem"));
+        const realCount = originalItems.length;
+        if (!realCount) return;
+
+        // 無限ループ用に先頭と末尾をクローン
+        const firstClone = originalItems[0].cloneNode(true);
+        const lastClone = originalItems[realCount - 1].cloneNode(true);
+
+        carousel.insertBefore(lastClone, originalItems[0]);
+        carousel.appendChild(firstClone);
+
+        const items = Array.from(carousel.querySelectorAll(".introItem"));
+        const total = items.length;           // realCount + 2
+        const firstRealIndex = 1;
+        const lastRealIndex  = total - 2;
+        const lastCloneIndex = total - 1;
+
+        let currentIndex = firstRealIndex;
+
+        function centerOnItem(index, behavior = "smooth") {
+          if (index < 0) index = 0;
+          if (index >= total) index = total - 1;
+          currentIndex = index;
+
+          const item = items[currentIndex];
+          if (!item) return;
+
+          const wrapperRect = wrapper.getBoundingClientRect();
+          const itemRect = item.getBoundingClientRect();
+
+          const centerWrapper = wrapperRect.left + wrapperRect.width / 2;
+          const centerItem    = itemRect.left + itemRect.width  / 2;
+
+          const delta = centerItem - centerWrapper;
+          const target = carousel.scrollLeft + delta;
+
+          carousel.scrollTo({ left: target, behavior });
+        }
+
+        // 初期位置：先頭の実アイテムを中央に
+        centerOnItem(firstRealIndex, "auto");
+
+        prevBtn.addEventListener("click", () => {
+          centerOnItem(currentIndex - 1);
+          // 左端クローンに到達したら、実アイテム側に瞬時ジャンプ（見た目の方向はそのまま）
+          setTimeout(() => {
+            if (currentIndex === 0) {
+              centerOnItem(lastRealIndex, "auto");
+            }
+          }, 350);
+        });
+
+        nextBtn.addEventListener("click", () => {
+          centerOnItem(currentIndex + 1);
+          // 右端クローンに到達したら、実アイテム側に瞬時ジャンプ（見た目の方向はそのまま）
+          setTimeout(() => {
+            if (currentIndex === lastCloneIndex) {
+              centerOnItem(firstRealIndex, "auto");
+            }
+          }, 350);
+        });
+      });
+    })();
+  </script>
+
+</body>
+</html>
