@@ -2764,8 +2764,8 @@ function showLineInfo(
       });
 
       intervalGroupSummary.innerHTML =
-        `チェックされたグループ数: ${checkedGroupIdx.length}<br>` +
-        `うち、同一間隔ペアが2つ以上あるグループ数: ${qualifiedGroupCount}<br>`;
+        `チェックされたグループ数 / Number of checked groups: ${checkedGroupIdx.length}<br>` +
+        `同一間隔ペアが2つ以上あるグループ数 / Number of groups with ≥2 equal-interval pairs: ${qualifiedGroupCount}<br>`;
     }
 
     // 行表示 ON/OFF（有効性評価：非表示ではなく背景色に反映）
@@ -2853,8 +2853,8 @@ function showLineInfo(
       });
 
       ratioPatternSummary.innerHTML =
-        `チェックされたパターン数: ${checkedPIdx.length}<br>` +
-        `比率条件を満たし追加線分が存在する3本組の数: ${validPatternCount}<br>`;
+        `チェックされたパターン数 / Number of checked patterns: ${checkedPIdx.length}<br>` +
+        `比率条件を満たし追加線分が存在する3本組の数 / Number of valid triplets satisfying the ratio condition (with extra segments): ${validPatternCount}<br>`;
     }
 
     // 行表示 ON/OFF（有効性評価：非表示にせず背景色で示す）＋ 割合更新
@@ -4228,7 +4228,7 @@ function applyThresholdFromUI() {
 let analysisPopupTimer = null;
 
 // 表示時間を変えたいならここを変更
-const ANALYSIS_POPUP_MS = 7000;    // ← ここを 2000, 5000, 8000 にすると簡単に調整
+const ANALYSIS_POPUP_MS = 5000;    // ← ここを 2000, 5000, 8000 にすると簡単に調整
 
 function showAnalysisPopup() {
   let popup = document.getElementById("analysisPopup");
