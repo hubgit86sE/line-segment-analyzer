@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <title>線分解析ツール / Line Segment Analyzer</title>
+  <title>線分解析ツール / Line Segment Analyzer Public ver.</title>
   <style>
     body {
       margin: 0;
@@ -337,24 +337,21 @@
     th.col-small, td.col-small { width: 50px; }
 
     th.col-canvas,
-    td.col-canvas {
-      width: 260px !important;
-      min-width: 260px !important;
-      max-width: 260px !important;
-    }
-
+    td.col-canvas,
     th.col-obj-canvas,
     td.col-obj-canvas {
-      width: 260px !important;
-      min-width: 260px !important;
-      max-width: 260px !important;
+      /* 画像の幅に応じてセル幅が広がるようにする */
+      white-space: nowrap;
     }
 
     td.col-canvas canvas,
     td.col-obj-canvas canvas {
       display: block;
-      width: 100%;
+      width: auto;
       height: auto;
+      /* 必要であれば高さだけは制限しておく（任意） */
+      max-height: 320px;
+      margin: 0 auto;
     }
 
     th.col-abc, td.col-abc { width: 60px; }
@@ -415,10 +412,10 @@
         <!-- 説明文：日英併記＋文毎に改行 -->
         <p>
                 本ツールは画像内の線分の位置、角度、長さが美的とされた理由を分析するための解析ツールです。
-                本ツールにおける美的(倫理的)判断の本質は、事物に対して絶対性/普遍性("it must be x")を要求することそのものとします。依拠はKantの『判断力批判』です。<br>
+                本ツールにおける美的(倫理的)判断の本質は、事物に対して絶対性/普遍性("it must be x")を要求することそのものとします。依拠はKantの『判断力批判』です。
                 何にどのような内容の絶対性/普遍性を要求するかは恣意的であり、"it"にも"x"にも「絶対的/普遍的でないこと」すら含め何でも入力可能です。
-                このため「何があるべきか」つまり美の内容は具体的対象によって定義できず、主観は自由であるため物理指標化は困難です。<br>
-                一方で物理的事象については、個々人がそれを恣意的に受容するかどうかとは別の問題として、例えば「線の関係に絶対性/普遍性があるか」を調べることで、美的要件の存在を解析可能です。<br>
+                このため「何があるべきか」つまり美の内容は具体的対象によって定義できず、主観は自由であるため物理指標化は困難です。
+                一方で物理的事象については、個々人がそれを恣意的に受容するかどうかとは別の問題として、例えば「線の関係に絶対性/普遍性があるか」を調べることで、美的要件の存在を解析可能です。
                 本ツールでは、美的要件としての絶対性/普遍性の物理事象における一例として、延長、平行、同一間隔、比率への一致を解析します。
                 絵画、建築物、自動車、その他産業製品等、芸術家やデザイナーがどこに線を合わせたのかをご覧いただけましたら幸いです。<br>
                 This tool analyzes why the positions, angles, and lengths of line segments in an image may be regarded as aesthetically meaningful.
@@ -481,6 +478,8 @@
 
       <div id="canvasHint">
         範囲フィルタ編集 / Range Filter Editing:<br>
+        ・節点の追加 … 赤線上をクリック<br>
+         &nbsp;&nbsp;Add vertex … Click on the red line<br>
         ・節点の削除 … Ctrl + クリック（3点未満にはなりません）<br>
         &nbsp;&nbsp;Delete vertex … Ctrl + Click (cannot reduce below 3 vertices)<br>
         ・ポリゴン全体の移動 … ポリゴン内側をドラッグ<br>
@@ -499,7 +498,7 @@
           <legend>線分抽出 / Line Extraction</legend>
           <label>
             最小線分長 (px) / Min line length (px):
-            <input type="number" id="minLineLength" step="1" min="1" value="10">
+            <input type="number" id="minLineLength" step="1" min="1" value="12">
           </label>
         </fieldset>
 
@@ -521,16 +520,12 @@
             角度差しきい値 (deg) / Angle diff threshold (deg):
             <input type="number" id="parallelAngle" step="0.1" min="0" max="90" value="2.0">
           </label>
-          <label>
-            長手方向オーバーラップ最小割合 / Min overlap ratio:
-            <input type="number" id="parallelInstrip" step="0.01" min="0" max="1" value="0.01">
-          </label>
         </fieldset>
 
         <fieldset>
           <legend>同一間隔 閾値 / Equal-Interval Thresholds</legend>
           <label>
-            間隔EPS (px) / Interval EPS (px):
+            間隔許容誤差 (px) / Interval EPS (px):
             <input type="number" id="intervalEps" step="0.1" min="0" value="1.0">
           </label>
         </fieldset>
@@ -538,7 +533,7 @@
         <fieldset>
           <legend>平行線比率 閾値 / Parallel-Ratio Thresholds</legend>
           <label>
-            比率点距離EPS (px) / Ratio point distance EPS (px):
+            比率点距離許容誤差 (px) / Ratio point distance EPS (px):
             <input type="number" id="ratioPointEps" step="0.1" min="0" value="3.0">
           </label>
         </fieldset>
@@ -614,9 +609,15 @@
   <!-- サンプル画像カルーセル ◁ ▷ 操作用スクリプト（中央寄せ＋ループ方向維持） -->
   <script>
     (function () {
-      window.addEventListener("DOMContentLoaded", () => {
+      function setupIntroCarousel() {
         const wrapper = document.getElementById("introImageWrapper");
         if (!wrapper) return;
+
+        // 二重初期化防止（Modern Script Editor で複数回呼ばれる可能性対策）
+        if (wrapper.dataset.carouselBound === "1") {
+          return;
+        }
+        wrapper.dataset.carouselBound = "1";
 
         const carousel = wrapper.querySelector(".introCarousel");
         const prevBtn = wrapper.querySelector(".introPrev");
@@ -629,7 +630,7 @@
 
         // 無限ループ用に先頭と末尾をクローン
         const firstClone = originalItems[0].cloneNode(true);
-        const lastClone = originalItems[realCount - 1].cloneNode(true);
+        const lastClone  = originalItems[realCount - 1].cloneNode(true);
 
         carousel.insertBefore(lastClone, originalItems[0]);
         carousel.appendChild(firstClone);
@@ -642,7 +643,8 @@
 
         let currentIndex = firstRealIndex;
 
-        function centerOnItem(index, behavior = "smooth") {
+        // 中央寄せスクロール
+        function centerOnItem(index, mode = "smooth") {
           if (index < 0) index = 0;
           if (index >= total) index = total - 1;
           currentIndex = index;
@@ -651,42 +653,62 @@
           if (!item) return;
 
           const wrapperRect = wrapper.getBoundingClientRect();
-          const itemRect = item.getBoundingClientRect();
+          const itemRect    = item.getBoundingClientRect();
 
           const centerWrapper = wrapperRect.left + wrapperRect.width / 2;
           const centerItem    = itemRect.left + itemRect.width  / 2;
 
-          const delta = centerItem - centerWrapper;
+          const delta  = centerItem - centerWrapper;
           const target = carousel.scrollLeft + delta;
 
-          carousel.scrollTo({ left: target, behavior });
+          if (mode === "instant") {
+            // CSSの scroll-behavior: smooth を一時的に無効化して即座に移動
+            const prevBehavior = carousel.style.scrollBehavior;
+            carousel.style.scrollBehavior = "auto";
+            carousel.scrollLeft = target;
+            carousel.style.scrollBehavior = prevBehavior;
+          } else {
+            carousel.scrollTo({ left: target, behavior: "smooth" });
+          }
         }
 
         // 初期位置：先頭の実アイテムを中央に
-        centerOnItem(firstRealIndex, "auto");
+        centerOnItem(firstRealIndex, "instant");
 
+        // ◁ ボタン
         prevBtn.addEventListener("click", () => {
-          centerOnItem(currentIndex - 1);
-          // 左端クローンに到達したら、実アイテム側に瞬時ジャンプ（見た目の方向はそのまま）
+          centerOnItem(currentIndex - 1, "smooth");
+
+          // 左端クローンに到達した場合のみ、瞬時に右端の実アイテムへジャンプ
           setTimeout(() => {
             if (currentIndex === 0) {
-              centerOnItem(lastRealIndex, "auto");
+              currentIndex = lastRealIndex;
+              centerOnItem(currentIndex, "instant");
             }
           }, 350);
         });
 
+        // ▷ ボタン
         nextBtn.addEventListener("click", () => {
-          centerOnItem(currentIndex + 1);
-          // 右端クローンに到達したら、実アイテム側に瞬時ジャンプ（見た目の方向はそのまま）
+          centerOnItem(currentIndex + 1, "smooth");
+
+          // 右端クローンに到達した場合のみ、瞬時に左端の実アイテムへジャンプ
           setTimeout(() => {
             if (currentIndex === lastCloneIndex) {
-              centerOnItem(firstRealIndex, "auto");
+              currentIndex = firstRealIndex;
+              centerOnItem(currentIndex, "instant");
             }
           }, 350);
         });
-      });
+      }
+
+      // DOM の状態に応じて、即時 or DOMContentLoaded 待ちで初期化
+      if (document.readyState === "loading") {
+        window.addEventListener("DOMContentLoaded", setupIntroCarousel);
+      } else {
+        setupIntroCarousel();
+      }
     })();
   </script>
-
 </body>
 </html>

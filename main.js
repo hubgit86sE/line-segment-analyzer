@@ -397,8 +397,8 @@ let cvReady = false;
 // 元画像（RGBAのcv.Mat）を保持してサムネイル生成・再分析に使う
 let originalImage = null;
 
-// 短い線分を除外するための閾値（ピクセル単位） ※UIで変更するので let
-let MIN_LINE_LENGTH = 20;
+// 短い線分を除外するための閾値（ピクセル単位） ※UIで変更する
+let MIN_LINE_LENGTH = 12;
 
 // === A/B/C 判定用の共通閾値（オレンジ線と黄色点線で共有する） ===
 let EXT_A_MIN_PROJ = 10.0;   // 条件A: |proj| >= 10
@@ -482,7 +482,7 @@ input.addEventListener("change", (event) => {
     if (maxDim > 300) {
       alert(
         "高解像度画像のため、処理落ち防止として画像サイズを最大300ピクセルに調整します。\n" +
-        "For this high-resolution image, the size will be scaled so that the longer side is 500 pixels to avoid processing slowdown."
+        "For this high-resolution image, the size will be scaled so that the longer side is 300 pixels to avoid processing slowdown."
       );
       const scale = 300 / maxDim;
       displayWidth = Math.round(origWidth * scale);
@@ -921,7 +921,7 @@ let LINE_EXTRACT_METHOD = "LSD"; // "LSD" | "HOUGHP"
 let HOUGH_RHO = 1;
 let HOUGH_THETA = Math.PI / 180;
 let HOUGH_THRESHOLD = 100;
-let HOUGH_MIN_LINE_LENGTH = 20; // ここは MIN_LINE_LENGTH と揃えてもOK
+let HOUGH_MIN_LINE_LENGTH = 12; // ここは MIN_LINE_LENGTH と揃えてもOK
 let HOUGH_MAX_LINE_GAP = 5;
 
 // ===== HoughP を「補助」に抑えるための制御（過剰抽出対策） =====
@@ -1551,31 +1551,6 @@ function analyzeParallelRelations(lineSegments) {
     return diff <= thresholdDeg || diff >= 180 - thresholdDeg;
   }
 
-  // 評価線分 segI に対して、長手方向 unitVec でどれだけ重なっているか（0〜1）
-  function overlapRatioOnLength(segI, segJ, unitVec) {
-    const p1 = [segI.x1, segI.y1];
-    const p2 = [segI.x2, segI.y2];
-    const q1 = [segJ.x1, segJ.y1];
-    const q2 = [segJ.x2, segJ.y2];
-
-    const dot2D = (u, v) => u[0] * v[0] + u[1] * v[1];
-
-    const proj_p1 = dot2D(p1, unitVec);
-    const proj_p2 = dot2D(p2, unitVec);
-    const p_min = Math.min(proj_p1, proj_p2);
-    const p_max = Math.max(proj_p1, proj_p2);
-
-    const proj_q1 = dot2D(q1, unitVec);
-    const proj_q2 = dot2D(q2, unitVec);
-    const q_min = Math.min(proj_q1, proj_q2);
-    const q_max = Math.max(proj_q1, proj_q2);
-
-    const overlapLen = Math.max(0, Math.min(p_max, q_max) - Math.max(p_min, q_min));
-    const len_p = p_max - p_min;
-    if (len_p <= 0) return 0;
-    return overlapLen / len_p;
-  }
-
   for (let i = 0; i < n; i++) {
     const segI = lineSegments[i];
     const baseVec = [segI.x2 - segI.x1, segI.y2 - segI.y1];
@@ -1584,6 +1559,7 @@ function analyzeParallelRelations(lineSegments) {
       result.push({ matchedParallel: [], summary: "length too short" });
       continue;
     }
+    // 現状、unitVec は他では使っていないが、将来拡張に備えて残している
     const unitVec = [baseVec[0] / norm, baseVec[1] / norm];
 
     const matchedParallel = [];
@@ -1593,19 +1569,15 @@ function analyzeParallelRelations(lineSegments) {
 
       const segJ = lineSegments[j];
 
-      // 角度が近くなければスキップ（UI の閾値を使用）
+      // 角度が近いものだけを平行一致とみなす（長手方向オーバーラップ率による制限は撤廃）
       if (!angleSimilar(segI.angle, segJ.angle, PARALLEL_ANGLE_THRESHOLD_DEG)) continue;
-
-      // 長手方向オーバーラップ率（UI の閾値を使用）
-      const ratio = overlapRatioOnLength(segI, segJ, unitVec);
-      if (ratio < PARALLEL_MIN_INSTRIP_LENGTH) continue;
 
       matchedParallel.push(j);
     }
 
     let summary = "";
     if (matchedParallel.length === 0) {
-      summary = "No parallel overlap";
+      summary = "No parallel match";
     } else {
       summary = "Parallel with: " + matchedParallel.join(",");
     }
@@ -1619,6 +1591,7 @@ function analyzeParallelRelations(lineSegments) {
   return result;
 }
 
+
 /**
  * 同一間隔の解析
  */
@@ -1627,6 +1600,9 @@ function analyzeEqualIntervalRelations(lineSegments) {
 
   // グローバルな「間隔グループ」リスト
   const groups = []; // { seed:number, pairs:[{a:number,b:number}], dists:number[] }
+
+  // ★ 既に登録した (a,b) ペアを記録するセット（重複カウント防止）
+  const seenPairs = new Set(); // key 例: "3-7"
 
   function angleSimilar(a, b, thresholdDeg) {
     let diff = Math.abs(a - b) % 180;
@@ -1703,10 +1679,22 @@ function analyzeEqualIntervalRelations(lineSegments) {
       const dist = Math.abs(nxt.off - curr.off);
       if (dist <= 0) continue;
 
+      // ★ (a,b) ペアをインデックス順に正規化して一意キーを作る
+      const aIdx = curr.idx;
+      const bIdx = nxt.idx;
+      const lo   = Math.min(aIdx, bIdx);
+      const hi   = Math.max(aIdx, bIdx);
+      const key  = `${lo}-${hi}`;
+
+      // 既に同じ幾何ペアを登録済みならスキップ（重複カウント防止）
+      if (seenPairs.has(key)) {
+        continue;
+      }
+
       let placed = false;
       for (const g of groups) {
         if (Math.abs(dist - g.seed) <= INTERVAL_EPS) {
-          g.pairs.push({ a: curr.idx, b: nxt.idx });
+          g.pairs.push({ a: aIdx, b: bIdx });
           g.dists.push(dist);
           placed = true;
           break;
@@ -1715,10 +1703,13 @@ function analyzeEqualIntervalRelations(lineSegments) {
       if (!placed) {
         groups.push({
           seed: dist,
-          pairs: [{ a: curr.idx, b: nxt.idx }],
+          pairs: [{ a: aIdx, b: bIdx }],
           dists: [dist],
         });
       }
+
+      // ★ この (a,b) ペアは登録済みとして記録
+      seenPairs.add(key);
     }
   }
 
@@ -2124,15 +2115,12 @@ function showLineInfo(
   html += `A: |proj| ≥ ${EXT_A_MIN_PROJ}, orth ≤ ${EXT_A_MAX_ORTH}<br>`;
   html += `B: orth ≤ ${EXT_B_MAX_ORTH}<br>`;
   html += `C: |proj| ≥ ${EXT_C_MIN_PROJ}, orth ≤ ${EXT_C_MAX_ORTH}<br>`;
-  html += `平行 / Parallel: angleDiff ≤ ${PARALLEL_ANGLE_THRESHOLD_DEG}°, overlap ≥ ${PARALLEL_MIN_INSTRIP_LENGTH}<br>`;
+  html += `平行 / Parallel: angleDiff ≤ ${PARALLEL_ANGLE_THRESHOLD_DEG}°<br>`;
   html += `同一間隔EPS / Equal-interval EPS: ±${INTERVAL_EPS} px<br>`;
   html += `比率点距離EPS / Ratio point distance EPS: ±${RATIO_POINT_EPS} px<br><br>`;
 
-  // 分析ボタン + Excel ダウンロードボタン（延長一致）
+  // Excel ダウンロードボタン（延長一致）
   html += `
-    <button id="analyzeBtn" style="margin-bottom:4px;">
-      条件A/B/C の抽出割合を分析 / Analyze extraction ratio of A/B/C
-    </button>
     <button id="downloadExtExcel" style="margin-left:8px; margin-bottom:4px;">
       延長一致結果をExcelダウンロード / Download extension results (Excel)
     </button>
@@ -2143,7 +2131,7 @@ function showLineInfo(
   html += `<div id="tableWrapper">`;
   html += `<table id="lineTable" border="1" cellspacing="0" cellpadding="4">`;
   html += "<thead><tr>";
-  html += `<th class="col-small">表示 / Show</th>`;
+  html += `<th class="col-small">有効性評価 / Design-valid evaluation</th>`;
   html += `<th class="col-small">#</th>`;
   html += `<th class="col-small">x1</th>`;
   html += `<th class="col-small">y1</th>`;
@@ -2165,7 +2153,7 @@ function showLineInfo(
     const rel = extRelations[idx];
     html += `<tr data-idx="${idx}">`;
     html += `<td class="col-small keep-visible"><input type="checkbox" class="row-toggle" data-index="${idx}" checked></td>`;
-    html += `<td class="col-small keep-visible">${idx}</td>`;
+    html += `<td class="col-small keep-visible">${idx+1}</td>`;
     html += `<td class="col-small">${seg.x1}</td>`;
     html += `<td class="col-small">${seg.y1}</td>`;
     html += `<td class="col-small">${seg.x2}</td>`;
@@ -2210,9 +2198,6 @@ function showLineInfo(
   html += `平行かつ条件を満たす相手を1本以上持つ線分 / Segments with ≥1 valid parallel match: ${parallelHasMatch} / ${filteredCount}<br><br>`;
 
   html += `
-    <button id="parallelAnalyzeBtn" style="margin-bottom:4px;">
-      平行抽出の割合を分析 / Analyze parallel extraction ratio
-    </button>
     <button id="downloadParallelExcel" style="margin-left:8px; margin-bottom:4px;">
       平行一致結果をExcelダウンロード / Download parallel results (Excel)
     </button>
@@ -2222,7 +2207,7 @@ function showLineInfo(
   html += `<div id="parallelTableWrapper">`;
   html += `<table id="parallelTable" border="1" cellspacing="0" cellpadding="4">`;
   html += "<thead><tr>";
-  html += `<th class="col-small">表示 / Show</th>`;
+  html += `<th class="col-small">有効性評価 / Design-valid evaluation</th>`;
   html += `<th class="col-small">#</th>`;
   html += `<th class="col-small">x1</th>`;
   html += `<th class="col-small">y1</th>`;
@@ -2239,7 +2224,7 @@ function showLineInfo(
     const pr = parallelRelations[idx];
     html += `<tr data-pidx="${idx}">`;
     html += `<td class="col-small keep-visible"><input type="checkbox" class="prow-toggle" data-index="${idx}" checked></td>`;
-    html += `<td class="col-small keep-visible">${idx}</td>`;
+    html += `<td class="col-small keep-visible">${idx+1}</td>`;
     html += `<td class="col-small">${seg.x1}</td>`;
     html += `<td class="col-small">${seg.y1}</td>`;
     html += `<td class="col-small">${seg.x2}</td>`;
@@ -2267,16 +2252,15 @@ function showLineInfo(
   html += `<b>同一間隔の分析結果 / Equal-Interval Results</b><br>`;
 
   const eqGroupsAll = Array.isArray(cachedEqualIntervalGroups) ? cachedEqualIntervalGroups : [];
-  const eqDisplayGroups = eqGroupsAll.filter(g => g && Array.isArray(g.pairs) && g.pairs.length > 0);
+  const eqDisplayGroups = eqGroupsAll.filter(
+    (g) => g && Array.isArray(g.pairs) && g.pairs.length >= 2
+  );
 
   html += `同一間隔グループ数 / # of equal-interval groups: ${eqDisplayGroups.length}<br>`;
   html += `線分総数 / # of segments: ${filteredCount}<br><br>`;
 
-  // ★ 割合を分析ボタン（新：グループ単位）
+  // エクセルダウンロードボタン
   html += `
-    <button id="intervalGroupAnalyzeBtn" style="margin-bottom:4px;">
-      同一間隔抽出の割合を分析 / Analyze equal-interval extraction ratio
-    </button>
     <button id="downloadIntervalExcel" style="margin-left:8px; margin-bottom:4px;">
       同一間隔結果をExcelダウンロード / Download equal-interval results (Excel)
     </button>
@@ -2290,7 +2274,7 @@ function showLineInfo(
     html += `<div id="intervalGroupTableWrapper">`;
     html += `<table id="intervalGroupTable" border="1" cellspacing="0" cellpadding="4">`;
     html += "<thead><tr>";
-    html += `<th class="col-small">表示 / Show</th>`;
+    html += `<th class="col-small">有効性評価 / Design-valid evaluation</th>`;
     html += `<th class="col-small">Group #</th>`;
     html += `<th class="col-small">Interval distance</th>`;
     html += `<th class="col-small">#pairs</th>`;
@@ -2314,7 +2298,7 @@ function showLineInfo(
 
       html += `<tr data-gidx="${gIdx}">`;
       html += `<td class="col-small keep-visible"><input type="checkbox" class="igrp-row-toggle" data-gidx="${gIdx}" checked></td>`;
-      html += `<td class="col-small keep-visible">${gIdx}</td>`;
+      html += `<td class="col-small keep-visible">${gIdx+1}</td>`;
       html += `<td class="col-small">${meanDist.toFixed(2)}</td>`;
       html += `<td class="col-small">${Array.isArray(g.pairs) ? g.pairs.length : 0}</td>`;
       html += `<td class="col-summary">${segList.join(", ")}</td>`;
@@ -2335,11 +2319,8 @@ function showLineInfo(
   html += `比率パターン数 / # of ratio patterns: ${ratioDisplayPatterns.length}<br>`;
   html += `線分総数 / # of segments: ${filteredCount}<br><br>`;
 
-  // ★ 割合を分析ボタン（新：パターン単位）
+  // エクセルダウンロードボタン
   html += `
-    <button id="ratioGroupAnalyzeBtn" style="margin-bottom:4px;">
-      平行線比率抽出の割合を分析 / Analyze parallel-ratio extraction ratio
-    </button>
     <button id="downloadRatioExcel" style="margin-left:8px; margin-bottom:4px;">
       比率結果をExcelダウンロード / Download ratio results (Excel)
     </button>
@@ -2353,7 +2334,7 @@ function showLineInfo(
     html += `<div id="ratioPatternTableWrapper">`;
     html += `<table id="ratioPatternTable" border="1" cellspacing="0" cellpadding="4">`;
     html += "<thead><tr>";
-    html += `<th class="col-small">表示 / Show</th>`;
+    html += `<th class="col-small">有効性評価 / Design-valid evaluation</th>`;
     html += `<th class="col-small">Pattern #</th>`;
     html += `<th class="col-summary">Line idx triplet</th>`;
     html += `<th class="col-small">Ratio</th>`;
@@ -2373,7 +2354,7 @@ function showLineInfo(
 
       html += `<tr data-pidx="${pIdx}">`;
       html += `<td class="col-small keep-visible"><input type="checkbox" class="rpattern-row-toggle" data-pidx="${pIdx}" checked></td>`;
-      html += `<td class="col-small keep-visible">${pIdx}</td>`;
+      html += `<td class="col-small keep-visible">${pIdx+1}</td>`;
       html += `<td class="col-summary">${triplet.join(", ")}</td>`;
       html += `<td class="col-small">${ratioVal != null ? ratioVal.toFixed(3) : ""}</td>`;
       html += `<td class="col-summary">${matchedIds.join(", ")}</td>`;
@@ -2387,22 +2368,92 @@ function showLineInfo(
   // ここまでの HTML を反映
   resultDiv.innerHTML = html;
 
+  // ---- 画像列を「表示 / Show」「#」の右隣に寄せる ----
+  // 延長：Object / AllPatterns(A+B+C) を # の右隣へ
+  (function () {
+    const table = document.getElementById("lineTable");
+    if (!table) return;
+    table.querySelectorAll("tr").forEach((row) => {
+      const cells = row.children;
+      // 期待する列数がない場合はスキップ
+      if (cells.length < 10) return;
+
+      const objCell = cells[8];   // Object 列
+      const allCell = cells[9];   // AllPatterns 列
+      if (!objCell || !allCell) return;
+
+      const x1Cell = cells[2];    // x1 列（元の 3 列目）
+      // Object を x1 の手前に移動
+      row.insertBefore(objCell, x1Cell);
+      // AllPatterns を Object の直後に移動
+      row.insertBefore(allCell, objCell.nextSibling);
+    });
+  })();
+
+  // 平行一致：Parallel Object / Parallel All を # の右隣へ
+  (function () {
+    const table = document.getElementById("parallelTable");
+    if (!table) return;
+    table.querySelectorAll("tr").forEach((row) => {
+      const cells = row.children;
+      if (cells.length < 10) return;
+
+      const objCell = cells[7];   // Parallel Object 列
+      const allCell = cells[8];   // Parallel All 列
+      if (!objCell || !allCell) return;
+
+      const x1Cell = cells[2];    // x1 列
+      row.insertBefore(objCell, x1Cell);
+      row.insertBefore(allCell, objCell.nextSibling);
+    });
+  })();
+
+  // 同一間隔：Equal-interval group thumbnail を Group # の右隣へ
+  (function () {
+    const table = document.getElementById("intervalGroupTable");
+    if (!table) return;
+
+    table.querySelectorAll("tr").forEach((row) => {
+      const cells = row.children;
+      // 列構成: 0: Show, 1: Group #, 2: Interval distance, 3: #pairs,
+      //         4: Segment idx included, 5: Equal-interval group thumbnail
+      if (cells.length < 6) return;
+
+      const thumbCell = cells[5]; // サムネイル列（元: 最終列, 0-based index）
+      if (!thumbCell) return;
+
+      const groupCell = cells[1]; // "Group #" 列
+      if (!groupCell || !groupCell.nextSibling) return;
+
+      // Group # の直後にサムネイル列を移動
+      row.insertBefore(thumbCell, groupCell.nextSibling);
+    });
+  })();
+
+  // 平行線比率：Ratio pattern thumbnail を Pattern # の右隣へ
+  (function () {
+    const table = document.getElementById("ratioPatternTable");
+    if (!table) return;
+    table.querySelectorAll("tr").forEach((row) => {
+      const cells = row.children;
+      if (cells.length < 6) return;
+
+      const thumbCell = cells[5];  // サムネイル列（元: 最終列）
+      if (!thumbCell) return;
+
+      const afterPattern = cells[2]; // Line idx triplet 列（Pattern # の次）
+      row.insertBefore(thumbCell, afterPattern);
+    });
+  })();
+
   // ===== 延長側イベント・サムネイル =====
   const table = document.getElementById("lineTable");
   const tbody = table.querySelector("tbody");
   const analysisSummary = document.getElementById("analysisSummary");
-
-  tbody.querySelectorAll("input.row-toggle").forEach((cb) => {
-    cb.addEventListener("change", (e) => {
-      const tr = e.target.closest("tr");
-      if (!tr) return;
-      if (e.target.checked) tr.classList.remove("hidden-row");
-      else tr.classList.add("hidden-row");
-    });
-  });
-
   const analyzeBtn = document.getElementById("analyzeBtn");
-  analyzeBtn.addEventListener("click", () => {
+
+  // ★ 割合計算ロジックを関数化
+  function updateExtensionSummary() {
     const checkedIdx = [];
     tbody.querySelectorAll("input.row-toggle").forEach((cb) => {
       if (cb.checked) {
@@ -2411,39 +2462,120 @@ function showLineInfo(
       }
     });
 
-    const total = checkedIdx.length;
-    if (total === 0) {
-      analysisSummary.textContent = "チェックされた線分がありません。 / No line segments are checked.";
+    // デザイン有効としてチェックされた線分が 0 本なら終了
+    if (checkedIdx.length === 0) {
+      analysisSummary.textContent =
+        "デザイン有効としてチェックされた線分がありません。 / No segments are marked as design-valid.";
       return;
     }
 
-    const checkedSet = new Set(checkedIdx);
-    let successA = 0;
-    let successB = 0;
-    let successC = 0;
+    const totalSegments = lineSegments.length;
+    if (totalSegments === 0) {
+      analysisSummary.textContent =
+        "線分総数が 0 本です。 / There are no line segments.";
+      return;
+    }
+
+    // 分母：線分総数
+    const denom = totalSegments;
+
+    // 分子：各条件について
+    // 「延長一致関係を1つ以上持つデザイン有効線分の本数（重複無し）」
+    const uniqSegA = new Set();
+    const uniqSegB = new Set();
+    const uniqSegC = new Set();
 
     for (const i of checkedIdx) {
       const rel = extRelations[i];
       if (!rel) continue;
 
-      if (rel.matchedA.some((j) => j !== i && checkedSet.has(j))) successA++;
-      if (rel.matchedB.some((j) => j !== i && checkedSet.has(j))) successB++;
-      if (rel.matchedC.some((j) => j !== i && checkedSet.has(j))) successC++;
+      const aList = Array.isArray(rel.matchedA) ? rel.matchedA : [];
+      const bList = Array.isArray(rel.matchedB) ? rel.matchedB : [];
+      const cList = Array.isArray(rel.matchedC) ? rel.matchedC : [];
+
+      // 各条件で少なくとも1つ関係があれば、
+      // 「その行で評価している緑の線分 i」を 1 本としてカウント
+      if (aList.length > 0) uniqSegA.add(i);
+      if (bList.length > 0) uniqSegB.add(i);
+      if (cList.length > 0) uniqSegC.add(i);
     }
 
-    const pct = (num) => ((num / total) * 100).toFixed(1);
+    const designValidCount = checkedIdx.length;
+    const pct = (num) => ((num / denom) * 100).toFixed(1);
 
     analysisSummary.innerHTML =
-      `チェックされた線分数 / Checked segments: ${total}<br>` +
-      `条件A / Condition A: ${successA}/${total} (${pct(successA)}%)<br>` +
-      `条件B / Condition B: ${successB}/${total} (${pct(successB)}%)<br>` +
-      `条件C / Condition C: ${successC}/${total} (${pct(successC)}%)`;
+      // 分母とデザイン有効線分の割合
+      `線分総数 / Total segments: ${denom}<br>` +
+      `デザイン有効としてチェックされた線分数 / # of segments marked design-valid: ` +
+        `${designValidCount} / ${denom} (${pct(designValidCount)}%)<br>` +
+      "<br>" +
+      // 条件ごとに「緑の線分本数（重複無し）」を分子とした割合
+      "条件別：延長一致関係を有するデザイン有効線分数（重複無し） / " +
+      "Per condition: # of design-valid segments having ≥1 extension relation (unique):<br>" +
+      `・条件A / Condition A: ${uniqSegA.size} / ${denom} (${pct(uniqSegA.size)}%)<br>` +
+      `・条件B / Condition B: ${uniqSegB.size} / ${denom} (${pct(uniqSegB.size)}%)<br>` +
+      `・条件C / Condition C: ${uniqSegC.size} / ${denom} (${pct(uniqSegC.size)}%)`;
+  }
+
+  // 行ごとの「有効性評価」チェック → 初期状態調整 + 背景色 + 割合再計算
+  tbody.querySelectorAll("input.row-toggle").forEach((cb) => {
+    const tr = cb.closest("tr");
+    if (!tr) return;
+
+    // hidden-row は今後使わないので、念のため外す
+    tr.classList.remove("hidden-row");
+
+    // この行で評価している緑の線分のインデックス
+    const idx = parseInt(cb.dataset.index, 10);
+    let hasAnyRelation = false;
+
+    if (!Number.isNaN(idx)) {
+      const rel = extRelations[idx];
+      if (rel) {
+        const aList = Array.isArray(rel.matchedA) ? rel.matchedA : [];
+        const bList = Array.isArray(rel.matchedB) ? rel.matchedB : [];
+        const cList = Array.isArray(rel.matchedC) ? rel.matchedC : [];
+        hasAnyRelation =
+          (aList.length > 0) ||
+          (bList.length > 0) ||
+          (cList.length > 0);
+      }
+    }
+
+    // ★ 初期状態：
+    //    A/B/C いずれの延長一致関係も 1 本もない線分は、
+    //    デザイン有効チェックを外し、行をグレー背景にしておく
+    if (!hasAnyRelation) {
+      cb.checked = false;
+      tr.style.backgroundColor = "#e5e7eb";
+    }
+
+    cb.addEventListener("change", (e) => {
+      if (e.target.checked) {
+        tr.style.backgroundColor = "";
+      } else {
+        tr.style.backgroundColor = "#e5e7eb";
+      }
+
+      // ★ チェック状態が変わったら即、割合を再計算
+      updateExtensionSummary();
+    });
   });
+
+  // ボタンも残しつつ、押したら同じロジックを実行（互換性維持）
+  if (analyzeBtn) {
+    analyzeBtn.addEventListener("click", () => {
+      updateExtensionSummary();
+    });
+  }
+
+  // ★ 初期表示時にも一度計算して表示しておく
+  updateExtensionSummary();
 
   // 延長のサムネイル
   lineSegments.forEach((seg, idx) => {
-    drawObjectLineThumbnail(`obj_${idx}`, seg, 0.8);
-    drawAllPatternsThumbnail(`all_${idx}`, idx, lineSegments, extRelations, 0.8);
+    drawObjectLineThumbnail(`obj_${idx}`, seg, 1.2);
+    drawAllPatternsThumbnail(`all_${idx}`, idx, lineSegments, extRelations, 1.2);
   });
 
   // 延長 Excel ダウンロード
@@ -2461,50 +2593,112 @@ function showLineInfo(
   const parallelAnalyzeBtn = document.getElementById("parallelAnalyzeBtn");
 
   lineSegments.forEach((seg, idx) => {
-    drawObjectLineThumbnail(`pobj_${idx}`, seg, 0.8);
-    drawParallelPatternsThumbnail(`pall_${idx}`, idx, lineSegments, parallelRelations, 0.8);
+    drawObjectLineThumbnail(`pobj_${idx}`, seg, 1.2);
+    drawParallelPatternsThumbnail(`pall_${idx}`, idx, lineSegments, parallelRelations, 1.2);
   });
 
-  pTbody.querySelectorAll("input.prow-toggle").forEach((cb) => {
-    cb.addEventListener("change", (e) => {
-      const tr = e.target.closest("tr");
-      if (!tr) return;
-      if (e.target.checked) tr.classList.remove("hidden-row");
-      else tr.classList.add("hidden-row");
-    });
-  });
-
-  parallelAnalyzeBtn.addEventListener("click", () => {
+  // ★ 割合計算ロジックを関数化
+  function updateParallelSummary() {
     const checkedIdx = [];
     pTbody.querySelectorAll("input.prow-toggle").forEach((cb) => {
       if (cb.checked) {
-        const idx = parseInt(cb.dataset.index, 10);
+        const idx = Number(cb.getAttribute("data-index"));
         if (!Number.isNaN(idx)) checkedIdx.push(idx);
       }
     });
 
-    const total = checkedIdx.length;
-    if (total === 0) {
-      parallelSummaryDiv.textContent = "チェックされた線分がありません。 / No line segments are checked.";
+    // デザイン有効としてチェックされた線分が 0 本なら終了
+    if (checkedIdx.length === 0) {
+      parallelSummaryDiv.textContent =
+        "デザイン有効としてチェックされた線分がありません。 / No segments are marked as design-valid.";
       return;
     }
 
-    const checkedSet = new Set(checkedIdx);
-    let successParallel = 0;
+    const totalSegments = lineSegments.length;
+    if (totalSegments === 0) {
+      parallelSummaryDiv.textContent =
+        "線分総数が 0 本です。 / There are no line segments.";
+      return;
+    }
+
+    // 分母：線分総数
+    const denom = totalSegments;
+
+    // 分子：平行一致関係を1つ以上持つデザイン有効線分の本数（重複無し）
+    const uniqParallelSeg = new Set();
 
     for (const i of checkedIdx) {
       const pr = parallelRelations[i];
-      if (!pr || !pr.matchedParallel) continue;
-      if (pr.matchedParallel.some((j) => j !== i && checkedSet.has(j))) {
-        successParallel++;
+      if (!pr || !Array.isArray(pr.matchedParallel)) continue;
+
+      if (pr.matchedParallel.length > 0) {
+        // この行で評価している緑の線分 i を 1 本としてカウント
+        uniqParallelSeg.add(i);
       }
     }
 
-    const pct = (num) => ((num / total) * 100).toFixed(1);
+    const designValidCount = checkedIdx.length;
+    const pct = (num) => ((num / denom) * 100).toFixed(1);
+
     parallelSummaryDiv.innerHTML =
-      `チェックされた線分数 / Checked segments: ${total}<br>` +
-      `平行相手を持つ線分 / Segments with parallel match: ${successParallel}/${total} (${pct(successParallel)}%)`;
+      // 分母とデザイン有効線分の割合（延長と同じ構成）
+      `線分総数 / Total segments: ${denom}<br>` +
+      `デザイン有効としてチェックされた線分数 / # of segments marked design-valid: ` +
+        `${designValidCount} / ${denom} (${pct(designValidCount)}%)<br>` +
+      "<br>" +
+      "平行一致関係を有するデザイン有効線分数（重複無し） / " +
+      "# of design-valid segments having ≥1 parallel match (unique):<br>" +
+      `・平行一致 / Parallel match: ${uniqParallelSeg.size} / ${denom} (${pct(uniqParallelSeg.size)}%)`;
+  }
+
+  // 「有効性評価」チェック → 初期状態調整 + 背景色 + 割合再計算
+  pTbody.querySelectorAll("input.prow-toggle").forEach((cb) => {
+    const tr = cb.closest("tr");
+    if (!tr) return;
+
+    // 行は非表示にせず、必ず表示したまま
+    tr.classList.remove("hidden-row");
+
+    // この行で評価している緑の線分のインデックス
+    const idx = Number(cb.getAttribute("data-index"));
+    let hasAnyParallel = false;
+
+    if (!Number.isNaN(idx)) {
+      const pr = parallelRelations[idx];
+      if (pr && Array.isArray(pr.matchedParallel)) {
+        hasAnyParallel = pr.matchedParallel.length > 0;
+      }
+    }
+
+    // ★ 初期状態：
+    //    平行一致相手が 1 本もいない線分は、デザイン有効チェックを外し、
+    //    行をグレー背景にしておく
+    if (!hasAnyParallel) {
+      cb.checked = false;
+      tr.style.backgroundColor = "#e5e7eb";
+    }
+
+    cb.addEventListener("change", (e) => {
+      if (e.target.checked) {
+        tr.style.backgroundColor = "";
+      } else {
+        tr.style.backgroundColor = "#e5e7eb";
+      }
+
+      // ★ チェック状態が変わったら即、割合を再計算
+      updateParallelSummary();
+    });
   });
+
+  // ボタンも残しつつ、押したら同じロジックを実行（互換性維持）
+  if (parallelAnalyzeBtn) {
+    parallelAnalyzeBtn.addEventListener("click", () => {
+      updateParallelSummary();
+    });
+  }
+
+  // ★ 初期表示時にも一度計算して表示しておく
+  updateParallelSummary();
 
   const parallelDownloadBtn = document.getElementById("downloadParallelExcel");
   if (parallelDownloadBtn) {
@@ -2514,101 +2708,100 @@ function showLineInfo(
   }
 
   // ===== 同一間隔（グループ）イベント・サムネイル =====
-  const intervalGroupWrapper   = document.getElementById("intervalGroupTableWrapper");
-  const intervalGroupTable     = document.getElementById("intervalGroupTable");
-  const intervalGroupSummary   = document.getElementById("intervalGroupAnalysisSummary");
-  const intervalGroupAnalyzeBtn = document.getElementById("intervalGroupAnalyzeBtn");
+  const intervalGroupWrapper    = document.getElementById("intervalGroupTableWrapper");
+  const intervalGroupTable      = document.getElementById("intervalGroupTable");
+  const intervalGroupSummary    = document.getElementById("intervalGroupAnalysisSummary");
 
-  if (intervalGroupWrapper && intervalGroupTable && intervalGroupAnalyzeBtn && Array.isArray(cachedEqualIntervalGroups)) {
-    const eqDisplayGroups = cachedEqualIntervalGroups.filter(g => g && Array.isArray(g.pairs) && g.pairs.length > 0);
+  if (
+    intervalGroupWrapper &&
+    intervalGroupTable &&
+    Array.isArray(cachedEqualIntervalGroups)
+  ) {
+    const eqDisplayGroups = cachedEqualIntervalGroups.filter(
+      (g) => g && Array.isArray(g.pairs) && g.pairs.length >= 2
+    );
     const iTbody = intervalGroupTable.querySelector("tbody");
 
     // グループごとのサムネイル描画
     eqDisplayGroups.forEach((g, gIdx) => {
       const canvas = document.getElementById(`iequalgrp_${gIdx}`);
       if (canvas) {
-        drawEqualIntervalGroupThumbnail(canvas.id, g, lineSegments, 0.9);
+        drawEqualIntervalGroupThumbnail(canvas.id, g, lineSegments, 1.2);
       }
     });
 
-    // 行表示 ON/OFF
+    // ★ 集計ロジック：カウントは「チェックされたグループ数」と
+    //    「そのうち同一間隔ペアが2つ以上あるグループ数」のみ
+    function updateIntervalGroupSummary() {
+      if (!iTbody) return;
+
+      // チェックされたグループのインデックスを取得
+      const checkedGroupIdx = [];
+      iTbody.querySelectorAll("input.igrp-row-toggle").forEach((cb) => {
+        if (cb.checked) {
+          const idx = parseInt(cb.dataset.gidx, 10);
+          if (!Number.isNaN(idx)) checkedGroupIdx.push(idx);
+        }
+      });
+
+      if (checkedGroupIdx.length === 0) {
+        intervalGroupSummary.textContent =
+          "チェックされたグループがありません / No groups are checked.";
+        return;
+      }
+
+      // 「同一間隔ペアが2つ以上あるグループ」のカウント
+      // （eqDisplayGroups 自体が既に pairs.length >= 2 でフィルタ済みだが、
+      //  念のため条件も残しておく）
+      let qualifiedGroupCount = 0;
+
+      checkedGroupIdx.forEach((gIdx) => {
+        const g = eqDisplayGroups[gIdx];
+        if (!g || !Array.isArray(g.pairs)) return;
+        if (g.pairs.length >= 2) {
+          qualifiedGroupCount++;
+        }
+      });
+
+      intervalGroupSummary.innerHTML =
+        `チェックされたグループ数: ${checkedGroupIdx.length}<br>` +
+        `うち、同一間隔ペアが2つ以上あるグループ数: ${qualifiedGroupCount}<br>`;
+    }
+
+    // 行表示 ON/OFF（有効性評価：非表示ではなく背景色に反映）
     if (iTbody) {
       iTbody.querySelectorAll("input.igrp-row-toggle").forEach((cb) => {
         cb.addEventListener("change", () => {
           const row = cb.closest("tr");
           if (!row) return;
-          if (cb.checked) row.classList.remove("hidden-row");
-          else row.classList.add("hidden-row");
+
+          // hidden-row は使わない／残っていたら外す
+          row.classList.remove("hidden-row");
+
+          if (cb.checked) {
+            row.style.backgroundColor = "";
+          } else {
+            row.style.backgroundColor = "#e5e7eb";
+          }
+
+          // ★ チェック状態が変わったら即、割合を再計算
+          updateIntervalGroupSummary();
         });
       });
     }
 
-    // ★ 割合を分析：グループ単位でチェックされたもののうち
-    //    「同一間隔ペアが2つ以上あるグループ」に含まれる線分の割合
-    intervalGroupAnalyzeBtn.addEventListener("click", () => {
-        if (!iTbody) return;
-
-        // チェックされたグループのインデックスを取得
-        const checkedGroupIdx = [];
-        iTbody.querySelectorAll("input.igrp-row-toggle").forEach((cb) => {
-            if (cb.checked) {
-                const idx = parseInt(cb.dataset.gidx, 10);
-                if (!Number.isNaN(idx)) checkedGroupIdx.push(idx);
-            }
-        });
-
-        if (checkedGroupIdx.length === 0) {
-            intervalGroupSummary.textContent =
-                "チェックされたグループがありません / No groups are checked.";
-            return;
-        }
-
-        const eqDisplay = eqDisplayGroups;
-
-        // 「同一間隔ペアが2つ以上あるグループ」に属する線分だけを集計
-        const segSet = new Set();
-        let qualifiedGroupCount = 0;
-
-        checkedGroupIdx.forEach((gIdx) => {
-            const g = eqDisplay[gIdx];
-            if (!g || !Array.isArray(g.pairs)) return;
-
-            // ★ ペアが2つ未満のグループは、割合計算の分子には寄与させない
-            if (g.pairs.length < 2) return;
-
-            qualifiedGroupCount++;
-
-            g.pairs.forEach((p) => {
-                if (p && typeof p.a === "number") segSet.add(p.a);
-                if (p && typeof p.b === "number") segSet.add(p.b);
-            });
-        });
-
-        const usedCount = segSet.size;
-        const totalSegments = lineSegments.length;
-        const ratio = totalSegments > 0 ? (usedCount / totalSegments) * 100 : 0;
-
-        // 表示文言も、「2ペア以上のグループ」に揃えておく
-        intervalGroupSummary.innerHTML =
-            `チェックされたグループ数: ${checkedGroupIdx.length}<br>` +
-            `うち、同一間隔ペアが2つ以上あるグループ数: ${qualifiedGroupCount}<br>` +
-            `同一間隔ペアが2つ以上あるグループに含まれる線分数: ${usedCount}<br>` +
-            `線分総数: ${totalSegments}<br>` +
-            `同一間隔に関与する線分の割合: ${ratio.toFixed(1)}%`;
-    });
+    // ★ 初期表示時にも一度計算して表示しておく
+    updateIntervalGroupSummary();
   }
 
   // ===== 平行線比率（パターン）イベント・サムネイル =====
-  const ratioPatternWrapper    = document.getElementById("ratioPatternTableWrapper");
-  const ratioPatternTable      = document.getElementById("ratioPatternTable");
-  const ratioPatternSummary    = document.getElementById("ratioPatternAnalysisSummary");
-  // ★ ここを必ず ratioGroupAnalyzeBtn にする（後述）
-  const ratioPatternAnalyzeBtn = document.getElementById("ratioGroupAnalyzeBtn");
+  const ratioPatternWrapper  = document.getElementById("ratioPatternTableWrapper");
+  const ratioPatternTable    = document.getElementById("ratioPatternTable");
+  const ratioPatternSummary  = document.getElementById("ratioPatternAnalysisSummary");
 
   if (
     ratioPatternWrapper &&
     ratioPatternTable &&
-    ratioPatternAnalyzeBtn &&
     Array.isArray(cachedRatioPatterns)
   ) {
     const patterns = cachedRatioPatterns.slice();
@@ -2619,28 +2812,14 @@ function showLineInfo(
       const canvas = document.getElementById(`rratio_${pIdx}`);
       if (canvas) {
         // パターンオブジェクトそのものを渡す
-        drawRatioPatternThumbnail(canvas.id, p, lineSegments, 0.9);
+        drawRatioPatternThumbnail(canvas.id, p, lineSegments, 1.2);
       }
     });
 
-    // 行表示 ON/OFF
-    if (rTbody) {
-      rTbody.querySelectorAll("input.rpattern-row-toggle").forEach((cb) => {
-        cb.addEventListener("change", () => {
-          const row = cb.closest("tr");
-          if (!row) return;
-          if (cb.checked) row.classList.remove("hidden-row");
-          else row.classList.add("hidden-row");
-        });
-      });
-    }
-
-    // ★ 割合を分析：
-    //    ・チェックされたパターンのうち、
-    //      「3本組(triplet)に対して比率に合致する追加線分(extras)が1本以上あるもの」だけを対象にする
-    //    ・その3本組＋追加線分に属する線分インデックスを重複なしで集計し、
-    //      線分総数に対する割合を計算する
-    ratioPatternAnalyzeBtn.addEventListener("click", () => {
+    // ★ 集計ロジック：
+    //    ・チェックされたパターン数
+    //    ・そのうち「比率条件を満たし追加線分が存在する3本組」の数
+    function updateRatioPatternSummary() {
       if (!rTbody) return;
 
       const checkedPIdx = [];
@@ -2657,15 +2836,13 @@ function showLineInfo(
         return;
       }
 
-      const usedSeg = new Set();
       let validPatternCount = 0;
 
       checkedPIdx.forEach((pi) => {
         const p = patterns[pi];
         if (!p) return;
 
-        const triplet = Array.isArray(p.triplet) ? p.triplet : [];
-        const extras  = Array.isArray(p.extras)  ? p.extras  : [];
+        const extras = Array.isArray(p.extras) ? p.extras : [];
 
         // 「比率に合致する他の線分」が存在しないパターンは対象外
         if (extras.length === 0) {
@@ -2673,26 +2850,37 @@ function showLineInfo(
         }
 
         validPatternCount += 1;
-
-        triplet.forEach((idx) => {
-          if (typeof idx === "number") usedSeg.add(idx);
-        });
-        extras.forEach((idx) => {
-          if (typeof idx === "number") usedSeg.add(idx);
-        });
       });
-
-      const usedCount = usedSeg.size;
-      const totalSegments = lineSegments.length;
-      const ratio = totalSegments > 0 ? (usedCount / totalSegments) * 100 : 0;
 
       ratioPatternSummary.innerHTML =
         `チェックされたパターン数: ${checkedPIdx.length}<br>` +
-        `比率条件を満たし追加線分が存在する3本組の数: ${validPatternCount}<br>` +
-        `これらの3本組と追加線分に属する線分数（重複なし）: ${usedCount}<br>` +
-        `線分総数: ${totalSegments}<br>` +
-        `線分総数に対する割合: ${ratio.toFixed(1)}%`;
-    });
+        `比率条件を満たし追加線分が存在する3本組の数: ${validPatternCount}<br>`;
+    }
+
+    // 行表示 ON/OFF（有効性評価：非表示にせず背景色で示す）＋ 割合更新
+    if (rTbody) {
+      rTbody.querySelectorAll("input.rpattern-row-toggle").forEach((cb) => {
+        cb.addEventListener("change", () => {
+          const row = cb.closest("tr");
+          if (!row) return;
+
+          // hidden-row は使わない／残っていたら外す
+          row.classList.remove("hidden-row");
+
+          if (cb.checked) {
+            row.style.backgroundColor = "";
+          } else {
+            row.style.backgroundColor = "#e5e7eb";
+          }
+
+          // ★ チェック状態が変わったら即、割合を再計算
+          updateRatioPatternSummary();
+        });
+      });
+    }
+
+    // ★ 初期表示時にも一度計算して表示しておく
+    updateRatioPatternSummary();
   }
 }
 
@@ -3243,18 +3431,17 @@ function exportEqualIntervalExcelFromCache() {
     "equal_interval_result.xlsx", // ファイル名
     "EqualInterval",              // シート名
     "intervalGroupTable",         // table id
-    6                             // サムネイル列: ヘッダ 6 列目が canvas 列
+    3                             // サムネイル列: ヘッダ 3 列目が canvas 列
   );
 }
 
 // 平行線比率パターンの分析結果
-//   → #ratioPatternTable （最終列がサムネイル列 rratio_*）をそのまま出力
 function exportRatioPatternExcelFromCache() {
   exportTableWithCanvasToExcel(
     "ratio_pattern_result.xlsx",  // ファイル名
     "RatioPattern",               // シート名
     "ratioPatternTable",          // table id
-    6                             // サムネイル列: ヘッダ 6 列目が canvas 列
+    3                             // サムネイル列: ヘッダ 3 列目が canvas 列
   );
 }
 
@@ -3577,6 +3764,19 @@ function drawParallelPatternsThumbnail(
   ctx.lineTo(seg.x2 * s, seg.y2 * s);
   ctx.stroke();
 
+  // ★ 評価線分の両端から「延長方向」に青い点線を出す
+  {
+    const g1x = seg.x1 * s;
+    const g1y = seg.y1 * s;
+    const g2x = seg.x2 * s;
+    const g2y = seg.y2 * s;
+
+    drawRayToEdge(g1x, g1y, [ base_u[0],  base_u[1]], "rgb(0,0,255)", 0.7, true);
+    drawRayToEdge(g1x, g1y, [-base_u[0], -base_u[1]], "rgb(0,0,255)", 0.7, true);
+    drawRayToEdge(g2x, g2y, [ base_u[0],  base_u[1]], "rgb(0,0,255)", 0.7, true);
+    drawRayToEdge(g2x, g2y, [-base_u[0], -base_u[1]], "rgb(0,0,255)", 0.7, true);
+  }
+
   // 平行抽出された他線分（オレンジ） + その両端から青点線
   for (const j of matchedIdxSet) {
     const sj = lineSegments[j];
@@ -3605,14 +3805,7 @@ function drawParallelPatternsThumbnail(
     }
   }
 
-  // 抽出基準となる「2本の垂線」（青い細い実線）
-  const p1s = [base_p1[0] * s, base_p1[1] * s];
-  const p2s = [base_p2[0] * s, base_p2[1] * s];
-
-  drawRayToEdge(p1s[0], p1s[1], [ base_n[0],  base_n[1]], "rgb(0,0,255)", 1.0, false);
-  drawRayToEdge(p1s[0], p1s[1], [-base_n[0], -base_n[1]], "rgb(0,0,255)", 1.0, false);
-  drawRayToEdge(p2s[0], p2s[1], [ base_n[0],  base_n[1]], "rgb(0,0,255)", 1.0, false);
-  drawRayToEdge(p2s[0], p2s[1], [-base_n[0], -base_n[1]], "rgb(0,0,255)", 1.0, false);
+  // ★ 評価線分の両端を通る青い垂線（base_n 方向）は描画しない
 }
 
 // ===== Interval All 用サムネイル描画 =====
@@ -4031,6 +4224,62 @@ function applyThresholdFromUI() {
   }
 }
 
+// ===== 解析中ポップアップ =====
+let analysisPopupTimer = null;
+
+// 表示時間を変えたいならここを変更
+const ANALYSIS_POPUP_MS = 7000;    // ← ここを 2000, 5000, 8000 にすると簡単に調整
+
+function showAnalysisPopup() {
+  let popup = document.getElementById("analysisPopup");
+  if (!popup) {
+    popup = document.createElement("div");
+    popup.id = "analysisPopup";
+
+    Object.assign(popup.style, {
+      position: "fixed",
+      bottom: "40px",
+      left: "380px",
+      pointerEvents: "none",
+      zIndex: "9999",
+    });
+
+    const box = document.createElement("div");
+    box.id = "analysisPopupBox";
+    Object.assign(box.style, {
+      padding: "12px 20px",
+      background: "linear-gradient(135deg, #4f46e5, #2563eb)", // 分析ボタンと合わせた色味
+      color: "#ffffff",
+      borderRadius: "8px",
+      fontSize: "15px",          // 少し大きく
+      fontWeight: "500",
+      whiteSpace: "pre-line",
+      boxShadow: "0 4px 12px rgba(37,99,235,0.4)", // 青系に合うshadow
+    });
+
+    popup.appendChild(box);
+    document.body.appendChild(popup);
+  }
+
+  const box = document.getElementById("analysisPopupBox");
+  box.textContent =
+    "分析中です。\n" +
+    "最小線分長を小さくすることで細かい線分の分析が可能です。\n" +
+    "一方、抽出される線分が多いほどクラッシュの可能性が高くなります。\n" +
+    "Now analyzing.\n" +
+    "By reducing the minimum line-segment length, finer segments can be analyzed.\n" +
+    "However, the more line segments are extracted, the higher the risk of the tool crashing.";
+
+  popup.style.display = "flex";
+
+  if (analysisPopupTimer)
+    clearTimeout(analysisPopupTimer);
+
+  analysisPopupTimer = setTimeout(() => {
+    popup.style.display = "none";
+  }, ANALYSIS_POPUP_MS);
+}
+
 // 再分析ボタン
 function reanalyzeWithCurrentThresholds() {
   // 画像がまだ選択されていない場合
@@ -4045,9 +4294,12 @@ function reanalyzeWithCurrentThresholds() {
     return;
   }
 
+  // 解析開始時ポップアップを表示（3秒で自動的に消える）
+  showAnalysisPopup();
+
   const statusSpan = document.getElementById("reanalyzeStatus");
   if (statusSpan) {
-    statusSpan.textContent = "再分析中... / Re-analyzing...";
+    statusSpan.textContent = "再分析中. / Re-analyzing.";
   }
 
   // ★ 再分析のたびに最新の UI 値を反映
@@ -4064,12 +4316,25 @@ function reanalyzeWithCurrentThresholds() {
   }
 }
 
-// DOM が読み込まれたら閾値初期化とボタンイベントを設定
-window.addEventListener("DOMContentLoaded", () => {
+// === 閾値パネル初期化＋再分析ボタン登録をまとめた関数 ===
+function setupThresholdPanelAndReanalyzeButton() {
+  // 閾値パネルの初期値を反映
   initThresholdInputs();
 
+  // 「分析 / 再分析を実行」ボタンにイベント登録
   const reBtn = document.getElementById("reanalyzeBtn");
-  if (reBtn) {
+  if (reBtn && !reBtn.dataset.bound) {
     reBtn.addEventListener("click", reanalyzeWithCurrentThresholds);
+    // 二重登録防止用フラグ
+    reBtn.dataset.bound = "1";
   }
-});
+}
+
+// DOM の状態に応じて即時 or DOMContentLoaded 待ちで初期化
+if (document.readyState === "loading") {
+  // まだ解析中（DOMContentLoaded 前）の場合はイベントを待つ
+  window.addEventListener("DOMContentLoaded", setupThresholdPanelAndReanalyzeButton);
+} else {
+  // すでに DOM 構築済み（SharePoint Modern Script Editor など）なら即実行
+  setupThresholdPanelAndReanalyzeButton();
+}
