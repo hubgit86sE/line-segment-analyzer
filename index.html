@@ -230,6 +230,7 @@
       width: auto;
       height: auto;
       display: block;
+      margin: 0 auto; /* ★ キャンパスを枠の中央に配置 */
       border: 1px solid #d1d5db;
       box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
       background-color: #ffffff;
@@ -470,7 +471,7 @@
     <div id="introInner">
       <div id="introText">
         <!-- 題目：日英連続・同じ大きさ・太字 -->
-        <h1 id="introTitle">線分解析ツール Line Segment Analyzer Public ver.</h1>
+        <h1 id="introTitle">線分解析ツール — Line Segment Analyzer (Public ver.)</h1>
 
         <!-- 説明文：日英併記＋文毎に改行 -->
         <p>
@@ -484,6 +485,9 @@
                 On the other hand, in physical configurations, it remains possible to examine whether there exists a “what it must be” in physical terms.
                 This tool operationalizes such “must” through extensions, parallels, equal intervals, and ratios.
                 It allows observation—across paintings, architecture, automobiles, and industrial products—of where artists or designers may have deliberately aligned lines.
+                <br>
+                Usage: Select image → Adjust range filter → Adjust thresholds → Run Analysis → Check whether each segment is design-valid and whether its relations are design-valid<br>
+                使い方：画像選択→範囲フィルタ調整→閾値調整→分析ボタン→デザインとして有効な線分か、その線分間の関係がデザインとして有効かをチェック
         </p>
       </div>
 
@@ -535,6 +539,17 @@
         <canvas id="canvas"></canvas>
       </div>
 
+      <div id="fileInputRow">
+        <span id="fileInputLabel">画像ファイル / Image file:</span>
+        <label for="imageInput" id="fileSelectButton">
+          ファイルを選択 / Choose file
+        </label>
+        <span id="fileNameText">
+          選択されていません / No file selected
+        </span>
+        <input type="file" id="imageInput" accept="image/*">
+      </div>
+
       <div id="canvasHint">
         範囲フィルタ編集 / Range Filter Editing:<br>
         ・節点の追加 … 赤線上をクリック<br>
@@ -545,15 +560,49 @@
         &nbsp;&nbsp;Move whole polygon … Drag inside the polygon
       </div>
 
-      <div id="fileInputRow">
-        <span id="fileInputLabel">画像ファイル / Image file:</span>
-        <label for="imageInput" id="fileSelectButton">
-          ファイルを選択 / Choose file
+      <!-- 範囲フィルタ入出力 -->
+      <div id="rangeFilterIoRow" style="margin: 4px 0 8px; font-size: 12px; max-width: 280px;">
+        <div style="margin-bottom: 4px;">
+          範囲フィルタ頂点の入出力 / Range filter vertices I/O
+        </div>
+
+        <!-- CSV ダウンロードボタン：幅100%でブロック表示 -->
+        <button id="downloadRangeCsvBtn" type="button"
+                style="
+                  display: block;
+                  width: 80%;
+                  text-align: center;
+                  padding: 4px 10px;
+                  border-radius: 999px;
+                  border: 1px solid #d1d5db;
+                  background-color: #ffffff;
+                  font-size: 10px;
+                  line-height: 1.4;
+                  color: #111827;
+                  margin-bottom: 4px;
+                ">
+          範囲フィルタのCSV取得 / Download CSV
+        </button>
+
+        <!-- CSV 復元ボタン（ラベル）：同じ幅100%・ブロック表示 -->
+        <label for="rangeCsvInput"
+               style="
+                 display: block;
+                 width: 80%;
+                 text-align: center;
+                 padding: 4px 10px;
+                 border-radius: 999px;
+                 border: 1px solid #d1d5db;
+                 background-color: #ffffff;
+                 font-size: 10px;
+                 line-height: 1.4;
+                 color: #111827;
+                 cursor: pointer;
+               ">
+          CSVから範囲フィルタ復元 / Load from CSV
         </label>
-        <span id="fileNameText">
-          選択されていません / No file selected
-        </span>
-        <input type="file" id="imageInput" accept="image/*">
+        <input type="file" id="rangeCsvInput" accept=".csv,text/csv"
+               style="display:none;">
       </div>
 
       <div id="thresholdPanel">
@@ -581,8 +630,15 @@
           <legend>平行 閾値 / Parallel Thresholds</legend>
           <label>
             角度差しきい値 (deg) / Angle diff threshold (deg):
-            <input type="number" id="parallelAngle" step="0.1" min="0" max="90" value="2.0">
+            <input type="number" id="parallelAngle" step="0.1" min="0" max="90" value="1.0">
           </label>
+          <!-- 将来使う場合用: 長手方向オーバーラップ率 -->
+          <!--
+          <label>
+            長手方向オーバーラップ率 / In-strip overlap ratio:
+            <input type="number" id="parallelInstrip" step="0.01" min="0" max="1" value="0.01">
+          </label>
+          -->
         </fieldset>
 
         <fieldset>
@@ -591,6 +647,10 @@
             間隔許容誤差 (px) / Interval EPS (px):
             <input type="number" id="intervalEps" step="0.1" min="0" value="1.0">
           </label>
+          <label>
+            角度差しきい値 (deg) / Angle diff threshold (deg):
+            <input type="number" id="intervalAngle" step="0.1" min="0" max="90" value="1.0">
+          </label>
         </fieldset>
 
         <fieldset>
@@ -598,6 +658,10 @@
           <label>
             比率点距離許容誤差 (px) / Ratio point distance EPS (px):
             <input type="number" id="ratioPointEps" step="0.1" min="0" value="3.0">
+          </label>
+          <label>
+            角度差しきい値 (deg) / Angle diff threshold (deg):
+            <input type="number" id="ratioAngle" step="0.1" min="0" max="90" value="1.0">
           </label>
         </fieldset>
 

@@ -375,6 +375,110 @@ canvas.addEventListener("mousemove", (evt) => {
   evt.preventDefault();
 });
 
+// === 範囲フィルタ頂点の CSV ダウンロード ===
+function downloadRangeFilterCsv() {
+  if (
+    !rangeFilterPolygon ||
+    !rangeFilterPolygon.points ||
+    rangeFilterPolygon.points.length < 3
+  ) {
+    alert(
+      "範囲フィルタが未設定です（頂点3点以上のポリゴンが必要です）。\n" +
+      "Range filter is not set (polygon with at least 3 vertices is required)."
+    );
+    return;
+  }
+
+  const pts = rangeFilterPolygon.points;
+  const lines = [];
+  // ヘッダー行
+  lines.push("index,x,y");
+  pts.forEach((p, i) => {
+    // 小数もそのまま保存（ドラッグ位置を忠実に再現）
+    lines.push(`${i},${p.x},${p.y}`);
+  });
+
+  const csvText = lines.join("\r\n");
+  const blob = new Blob([csvText], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "range_filter_vertices.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// === CSV から範囲フィルタ頂点を読み込み・復元 ===
+function importRangeFilterFromCsvText(csvText) {
+  const lines = csvText.split(/\r\n|\r|\n/).filter((ln) => ln.trim() !== "");
+  if (lines.length === 0) {
+    alert("CSVが空です / CSV is empty.");
+    return;
+  }
+
+  let startIdx = 0;
+  // 先頭行がヘッダーらしい場合（x か y を含む）をスキップ
+  const first = lines[0].toLowerCase();
+  if (first.includes("x") && first.includes("y")) {
+    startIdx = 1;
+  }
+
+  const pts = [];
+  for (let i = startIdx; i < lines.length; i++) {
+    const row = lines[i].trim();
+    if (!row) continue;
+    const cols = row.split(",").map((s) => s.trim());
+    if (cols.length < 2) continue;
+
+    let xStr, yStr;
+    if (cols.length >= 3) {
+      // index,x,y 形式
+      xStr = cols[1];
+      yStr = cols[2];
+    } else {
+      // x,y 形式
+      xStr = cols[0];
+      yStr = cols[1];
+    }
+
+    const x = parseFloat(xStr);
+    const y = parseFloat(yStr);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+    pts.push({ x, y });
+  }
+
+  if (pts.length < 3) {
+    alert(
+      "有効な頂点が 3 点未満です。少なくとも 3 点必要です。\n" +
+      "There must be at least 3 valid vertices."
+    );
+    return;
+  }
+
+  // キャンバスサイズにクランプ（異なるサイズの画像で使った場合の保険）
+  const clampX = (v) => Math.max(0, Math.min(canvas.width - 1, v));
+  const clampY = (v) => Math.max(0, Math.min(canvas.height - 1, v));
+  const clampedPts = pts.map((p) => ({
+    x: clampX(p.x),
+    y: clampY(p.y),
+  }));
+
+  rangeFilterPolygon = { points: clampedPts };
+
+  // ドラッグ状態リセット
+  rfDraggingVertexIndex = -1;
+  rfDraggingWhole = false;
+  rfDragStartMouse = null;
+  rfDragStartPoints = null;
+
+  // 元画像＋ポリゴンを描画
+  rfRedrawOriginalWithPolygon();
+}
+
 function rfEndDrag() {
   rfDraggingVertexIndex = -1;
   rfDraggingWhole = false;
@@ -390,6 +494,40 @@ canvas.addEventListener("mouseleave", () => {
   rfEndDrag();
 });
 
+// === 範囲フィルタ CSV I/O ボタンのイベント設定 ===
+const downloadRangeCsvBtn = document.getElementById("downloadRangeCsvBtn");
+const rangeCsvInput = document.getElementById("rangeCsvInput");
+
+if (downloadRangeCsvBtn) {
+  downloadRangeCsvBtn.addEventListener("click", () => {
+    downloadRangeFilterCsv();
+  });
+}
+
+if (rangeCsvInput) {
+  rangeCsvInput.addEventListener("change", (evt) => {
+    const file = evt.target.files && evt.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = typeof reader.result === "string" ? reader.result : "";
+        importRangeFilterFromCsvText(text);
+      } catch (e) {
+        console.error(e);
+        alert(
+          "CSVの読み込みに失敗しました。\n" +
+          "Failed to load CSV for range filter."
+        );
+      } finally {
+        // 同じファイルを再度選べるようにリセット
+        rangeCsvInput.value = "";
+      }
+    };
+    reader.readAsText(file);
+  });
+}
 
 // OpenCV.js の初期化フラグ
 let cvReady = false;
@@ -411,7 +549,7 @@ let EXT_C_MAX_ORTH = 5.0;    // 条件C: orth_rev <= 5
 
 // === 平行一致用パラメータ ===
 // 角度差しきい値（度）
-let PARALLEL_ANGLE_THRESHOLD_DEG = 2.0;
+let PARALLEL_ANGLE_THRESHOLD_DEG = 1.0;
 
 // 評価線分に対して「長手方向」でどれだけ重なっていれば
 // 平行一致とみなすか（0〜1 の割合）
@@ -420,10 +558,14 @@ let PARALLEL_MIN_INSTRIP_LENGTH = 0.01;
 TH = 0.01;
 
 // === 同一間隔グループ用パラメータ ===
+// 同一間隔判定用の角度差しきい値（度）
+let INTERVAL_ANGLE_THRESHOLD_DEG = 1.0;
 // 法線方向の間隔（px）が seed ± EPS なら同一間隔グループとみなす
 let INTERVAL_EPS = 1.0;
 
 // === 平行線比率用パラメータ ===
+// 平行比率パターン検出用の角度差しきい値（度）
+let RATIO_ANGLE_THRESHOLD_DEG = 1.0;
 // 幾何級数上の生成点と実線の交点との許容距離（px）
 let RATIO_POINT_EPS = 5.0;   // Python版に合わせて 5px
 
@@ -1651,8 +1793,8 @@ function analyzeEqualIntervalRelations(lineSegments) {
 
       const segJ = lineSegments[j];
 
-      // 平行でなければスキップ
-      if (!angleSimilar(segI.angle, segJ.angle, PARALLEL_ANGLE_THRESHOLD_DEG)) continue;
+      // 平行でなければスキップ（同一間隔用の角度閾値を使用）
+      if (!angleSimilar(segI.angle, segJ.angle, INTERVAL_ANGLE_THRESHOLD_DEG)) continue;
 
       // 長手方向オーバーラップ（固定 0.01）
       const ratio = overlapRatioOnLength(segI, segJ, unitVec);
@@ -1842,7 +1984,8 @@ function analyzeParallelRatioRelations(lineSegments) {
       if (used[j]) continue;
 
       const segJ = lineSegments[j];
-      if (!angleSimilar(segI.angle, segJ.angle, PARALLEL_ANGLE_THRESHOLD_DEG)) {
+      // 平行比率用の角度閾値を使用
+      if (!angleSimilar(segI.angle, segJ.angle, RATIO_ANGLE_THRESHOLD_DEG)) {
         continue;
       }
 
@@ -2107,31 +2250,20 @@ function showLineInfo(
 
   let html = "";
   html += `<b>延長一致の分析結果 / Extension (A/B/C) Results</b><br>`;
-  html += `線分数（フィルタ後） / Line segments (after filtering): ${filteredCount}<br>`;
-
-  // 閾値の表示
-  html += "<b>閾値（現在の設定） / Thresholds (current)</b><br>";
-  html += `最短線分長 / Min line length: ${MIN_LINE_LENGTH} px<br>`;
-  html += `A: |proj| ≥ ${EXT_A_MIN_PROJ}, orth ≤ ${EXT_A_MAX_ORTH}<br>`;
-  html += `B: orth ≤ ${EXT_B_MAX_ORTH}<br>`;
-  html += `C: |proj| ≥ ${EXT_C_MIN_PROJ}, orth ≤ ${EXT_C_MAX_ORTH}<br>`;
-  html += `平行 / Parallel: angleDiff ≤ ${PARALLEL_ANGLE_THRESHOLD_DEG}°<br>`;
-  html += `同一間隔EPS / Equal-interval EPS: ±${INTERVAL_EPS} px<br>`;
-  html += `比率点距離EPS / Ratio point distance EPS: ±${RATIO_POINT_EPS} px<br><br>`;
 
   // Excel ダウンロードボタン（延長一致）
   html += `
+    <div id="analysisSummary" style="margin-bottom:8px;"></div>
     <button id="downloadExtExcel" style="margin-left:8px; margin-bottom:4px;">
       延長一致結果をExcelダウンロード / Download extension results (Excel)
     </button>
-    <div id="analysisSummary" style="margin-bottom:8px;"></div>
   `;
 
   // ===== 延長一致テーブル =====
   html += `<div id="tableWrapper">`;
   html += `<table id="lineTable" border="1" cellspacing="0" cellpadding="4">`;
   html += "<thead><tr>";
-  html += `<th class="col-small">有効性評価 / Design-valid evaluation</th>`;
+  html += `<th class="col-small">有効☑ / Design☑</th>`;
   html += `<th class="col-small">#</th>`;
   html += `<th class="col-small">x1</th>`;
   html += `<th class="col-small">y1</th>`;
@@ -2195,19 +2327,18 @@ function showLineInfo(
       parallelHasMatch++;
     }
   }
-  html += `平行かつ条件を満たす相手を1本以上持つ線分 / Segments with ≥1 valid parallel match: ${parallelHasMatch} / ${filteredCount}<br><br>`;
 
   html += `
+    <div id="parallelAnalysisSummary" style="margin-bottom:8px;"></div>
     <button id="downloadParallelExcel" style="margin-left:8px; margin-bottom:4px;">
       平行一致結果をExcelダウンロード / Download parallel results (Excel)
     </button>
-    <div id="parallelAnalysisSummary" style="margin-bottom:8px;"></div>
   `;
 
   html += `<div id="parallelTableWrapper">`;
   html += `<table id="parallelTable" border="1" cellspacing="0" cellpadding="4">`;
   html += "<thead><tr>";
-  html += `<th class="col-small">有効性評価 / Design-valid evaluation</th>`;
+  html += `<th class="col-small">有効☑ / Design☑</th>`;
   html += `<th class="col-small">#</th>`;
   html += `<th class="col-small">x1</th>`;
   html += `<th class="col-small">y1</th>`;
@@ -2256,15 +2387,12 @@ function showLineInfo(
     (g) => g && Array.isArray(g.pairs) && g.pairs.length >= 2
   );
 
-  html += `同一間隔グループ数 / # of equal-interval groups: ${eqDisplayGroups.length}<br>`;
-  html += `線分総数 / # of segments: ${filteredCount}<br><br>`;
-
   // エクセルダウンロードボタン
   html += `
+    <div id="intervalGroupAnalysisSummary" style="margin-bottom:8px;"></div>
     <button id="downloadIntervalExcel" style="margin-left:8px; margin-bottom:4px;">
       同一間隔結果をExcelダウンロード / Download equal-interval results (Excel)
     </button>
-    <div id="intervalGroupAnalysisSummary" style="margin-bottom:8px;"></div>
   `;
   html += `<div id="intervalGroupAnalysisSummary" style="margin-bottom:8px;"></div>`;
 
@@ -2274,7 +2402,7 @@ function showLineInfo(
     html += `<div id="intervalGroupTableWrapper">`;
     html += `<table id="intervalGroupTable" border="1" cellspacing="0" cellpadding="4">`;
     html += "<thead><tr>";
-    html += `<th class="col-small">有効性評価 / Design-valid evaluation</th>`;
+    html += `<th class="col-small">有効☑ / Design☑</th>`;
     html += `<th class="col-small">Group #</th>`;
     html += `<th class="col-small">Interval distance</th>`;
     html += `<th class="col-small">#pairs</th>`;
@@ -2316,15 +2444,12 @@ function showLineInfo(
   const ratioPatternsAll = Array.isArray(cachedRatioPatterns) ? cachedRatioPatterns : [];
   const ratioDisplayPatterns = ratioPatternsAll.slice();  // 全パターンを表示
 
-  html += `比率パターン数 / # of ratio patterns: ${ratioDisplayPatterns.length}<br>`;
-  html += `線分総数 / # of segments: ${filteredCount}<br><br>`;
-
   // エクセルダウンロードボタン
   html += `
+    <div id="ratioPatternAnalysisSummary" style="margin-bottom:8px;"></div>
     <button id="downloadRatioExcel" style="margin-left:8px; margin-bottom:4px;">
       比率結果をExcelダウンロード / Download ratio results (Excel)
     </button>
-    <div id="ratioPatternAnalysisSummary" style="margin-bottom:8px;"></div>
   `;
   html += `<div id="ratioPatternAnalysisSummary" style="margin-bottom:8px;"></div>`;
 
@@ -2334,7 +2459,7 @@ function showLineInfo(
     html += `<div id="ratioPatternTableWrapper">`;
     html += `<table id="ratioPatternTable" border="1" cellspacing="0" cellpadding="4">`;
     html += "<thead><tr>";
-    html += `<th class="col-small">有効性評価 / Design-valid evaluation</th>`;
+    html += `<th class="col-small">有効☑ / Design☑</th>`;
     html += `<th class="col-small">Pattern #</th>`;
     html += `<th class="col-summary">Line idx triplet</th>`;
     html += `<th class="col-small">Ratio</th>`;
@@ -2506,11 +2631,11 @@ function showLineInfo(
     analysisSummary.innerHTML =
       // 分母とデザイン有効線分の割合
       `線分総数 / Total segments: ${denom}<br>` +
-      `デザイン有効としてチェックされた線分数 / # of segments marked design-valid: ` +
+      `有効としてチェックされた線分数 / # of segments marked design-valid: ` +
         `${designValidCount} / ${denom} (${pct(designValidCount)}%)<br>` +
       "<br>" +
       // 条件ごとに「緑の線分本数（重複無し）」を分子とした割合
-      "条件別：延長一致関係を有するデザイン有効線分数（重複無し） / " +
+      "条件別：延長一致関係を有する有効線分数（重複無し） / " +
       "Per condition: # of design-valid segments having ≥1 extension relation (unique):<br>" +
       `・条件A / Condition A: ${uniqSegA.size} / ${denom} (${pct(uniqSegA.size)}%)<br>` +
       `・条件B / Condition B: ${uniqSegB.size} / ${denom} (${pct(uniqSegB.size)}%)<br>` +
@@ -2643,7 +2768,7 @@ function showLineInfo(
     parallelSummaryDiv.innerHTML =
       // 分母とデザイン有効線分の割合（延長と同じ構成）
       `線分総数 / Total segments: ${denom}<br>` +
-      `デザイン有効としてチェックされた線分数 / # of segments marked design-valid: ` +
+      `有効としてチェックされた線分数 / # of segments marked design-valid: ` +
         `${designValidCount} / ${denom} (${pct(designValidCount)}%)<br>` +
       "<br>" +
       "平行一致関係を有するデザイン有効線分数（重複無し） / " +
@@ -2764,7 +2889,7 @@ function showLineInfo(
       });
 
       intervalGroupSummary.innerHTML =
-        `チェックされたグループ数 / Number of checked groups: ${checkedGroupIdx.length}<br>` +
+        `有効としてチェックされたグループ数 / # of groups marked design-valid: ${checkedGroupIdx.length}<br>` +
         `同一間隔ペアが2つ以上あるグループ数 / Number of groups with ≥2 equal-interval pairs: ${qualifiedGroupCount}<br>`;
     }
 
@@ -2853,7 +2978,7 @@ function showLineInfo(
       });
 
       ratioPatternSummary.innerHTML =
-        `チェックされたパターン数 / Number of checked patterns: ${checkedPIdx.length}<br>` +
+        `有効としてチェックされたパターン数 / # of patterns marked design-valid: ${checkedPIdx.length}<br>` +
         `比率条件を満たし追加線分が存在する3本組の数 / Number of valid triplets satisfying the ratio condition (with extra segments): ${validPatternCount}<br>`;
     }
 
@@ -4140,10 +4265,12 @@ function initThresholdInputs() {
   const cMin   = document.getElementById("extCmin");
   const cOrth  = document.getElementById("extCorth");
 
-  const pAngle     = document.getElementById("parallelAngle");
-  const pInstrip   = document.getElementById("parallelInstrip");
-  const intervalEp = document.getElementById("intervalEps");
-  const ratioEp    = document.getElementById("ratioPointEps");
+  const pAngle       = document.getElementById("parallelAngle");
+  const pInstrip     = document.getElementById("parallelInstrip");
+  const intervalEp   = document.getElementById("intervalEps");
+  const intervalAng  = document.getElementById("intervalAngle");
+  const ratioEp      = document.getElementById("ratioPointEps");
+  const ratioAng     = document.getElementById("ratioAngle");
 
   // 線分長
   if (minLen) minLen.value = MIN_LINE_LENGTH;
@@ -4159,11 +4286,13 @@ function initThresholdInputs() {
   if (pAngle)   pAngle.value   = PARALLEL_ANGLE_THRESHOLD_DEG;
   if (pInstrip) pInstrip.value = PARALLEL_MIN_INSTRIP_LENGTH;
 
-  // 同一間隔 EPS
-  if (intervalEp) intervalEp.value = INTERVAL_EPS;
+  // 同一間隔 EPS & 角度
+  if (intervalEp)  intervalEp.value  = INTERVAL_EPS;
+  if (intervalAng) intervalAng.value = INTERVAL_ANGLE_THRESHOLD_DEG;
 
-  // 平行線比率 EPS
-  if (ratioEp) ratioEp.value = RATIO_POINT_EPS;
+  // 平行線比率 EPS & 角度
+  if (ratioEp)  ratioEp.value  = RATIO_POINT_EPS;
+  if (ratioAng) ratioAng.value = RATIO_ANGLE_THRESHOLD_DEG;
 }
 
 function applyThresholdFromUI() {
@@ -4174,10 +4303,12 @@ function applyThresholdFromUI() {
   const cMin   = document.getElementById("extCmin");
   const cOrth  = document.getElementById("extCorth");
 
-  const pAngle     = document.getElementById("parallelAngle");
-  const pInstrip   = document.getElementById("parallelInstrip");
-  const intervalEp = document.getElementById("intervalEps");
-  const ratioEp    = document.getElementById("ratioPointEps");
+  const pAngle       = document.getElementById("parallelAngle");
+  const pInstrip     = document.getElementById("parallelInstrip");
+  const intervalEp   = document.getElementById("intervalEps");
+  const intervalAng  = document.getElementById("intervalAngle");
+  const ratioEp      = document.getElementById("ratioPointEps");
+  const ratioAng     = document.getElementById("ratioAngle");
 
   // 線分長
   if (minLen) {
@@ -4211,16 +4342,24 @@ function applyThresholdFromUI() {
     PARALLEL_MIN_INSTRIP_LENGTH = vPInstrip;
   }
 
-  // 同一間隔 EPS
-  const vInterval = intervalEp ? parseFloat(intervalEp.value) : NaN;
+  // 同一間隔 EPS & 角度
+  const vInterval = intervalEp  ? parseFloat(intervalEp.value)  : NaN;
+  const vIntAng   = intervalAng ? parseFloat(intervalAng.value) : NaN;
   if (!isNaN(vInterval) && vInterval >= 0) {
     INTERVAL_EPS = vInterval;
   }
+  if (!isNaN(vIntAng) && vIntAng >= 0) {
+    INTERVAL_ANGLE_THRESHOLD_DEG = vIntAng;
+  }
 
-  // 平行線比率 EPS
-  const vRatio = ratioEp ? parseFloat(ratioEp.value) : NaN;
+  // 平行線比率 EPS & 角度
+  const vRatio    = ratioEp  ? parseFloat(ratioEp.value)  : NaN;
+  const vRatioAng = ratioAng ? parseFloat(ratioAng.value) : NaN;
   if (!isNaN(vRatio) && vRatio >= 0) {
     RATIO_POINT_EPS = vRatio;
+  }
+  if (!isNaN(vRatioAng) && vRatioAng >= 0) {
+    RATIO_ANGLE_THRESHOLD_DEG = vRatioAng;
   }
 }
 
