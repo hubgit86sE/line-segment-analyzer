@@ -536,7 +536,7 @@ let cvReady = false;
 let originalImage = null;
 
 // 短い線分を除外するための閾値（ピクセル単位） ※UIで変更する
-let MIN_LINE_LENGTH = 12;
+let MIN_LINE_LENGTH = 6;
 
 // === A/B/C 判定用の共通閾値（オレンジ線と黄色点線で共有する） ===
 let EXT_A_MIN_PROJ = 10.0;   // 条件A: |proj| >= 10
@@ -1063,7 +1063,7 @@ let LINE_EXTRACT_METHOD = "LSD"; // "LSD" | "HOUGHP"
 let HOUGH_RHO = 1;
 let HOUGH_THETA = Math.PI / 180;
 let HOUGH_THRESHOLD = 100;
-let HOUGH_MIN_LINE_LENGTH = 12; // ここは MIN_LINE_LENGTH と揃えてもOK
+let HOUGH_MIN_LINE_LENGTH = 6; // ここは MIN_LINE_LENGTH と揃えてもOK
 let HOUGH_MAX_LINE_GAP = 5;
 
 // ===== HoughP を「補助」に抑えるための制御（過剰抽出対策） =====
