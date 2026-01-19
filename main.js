@@ -621,12 +621,12 @@ input.addEventListener("change", (event) => {
     let displayHeight = origHeight;
 
     // ★ n px を超える場合は、ポップアップを出してから長辺 n にスケーリング
-    if (maxDim > 300) {
+    if (maxDim > 600) {
       alert(
-        "高解像度画像のため、処理落ち防止として画像サイズを最大300ピクセルに調整します。\n" +
-        "For this high-resolution image, the size will be scaled so that the longer side is 300 pixels to avoid processing slowdown."
+        "高解像度画像のため、処理落ち防止として画像サイズを最大600ピクセルに調整します。\n" +
+        "For this high-resolution image, the size will be scaled so that the longer side is 600 pixels to avoid processing slowdown."
       );
-      const scale = 300 / maxDim;
+      const scale = 600 / maxDim;
       displayWidth = Math.round(origWidth * scale);
       displayHeight = Math.round(origHeight * scale);
     }
@@ -674,17 +674,17 @@ let USE_REPRESENTATIVE_LINES = true;
 
 // 初期グルーピング（Python の groups 作成に対応）
 let REP_GROUP_ANGLE_THR_DEG = 3.0;     // 角度差
-let REP_GROUP_NORMAL_THR_PX = 3.0;     // 法線距離
+let REP_GROUP_NORMAL_THR_PX = 5.0;     // 法線距離
 let REP_GROUP_LONG_GAP_PX = 5.0;       // 長手方向の“近さ”（少なくともどれかのメンバに近い）
 let REP_MIN_GROUP_SIZE = 1;            // 1 にすると孤立線分も代表線化（=実質そのまま）
 
 // グループ統合（Python の Union-Find マージに対応）
-let REP_MERGE_ANGLE_THR_DEG = 2.5;
-let REP_MERGE_NORMAL_THR_PX = 6.0;
-let REP_MERGE_LONG_GAP_PX = 18.0;
+let REP_MERGE_ANGLE_THR_DEG = 3.0;
+let REP_MERGE_NORMAL_THR_PX = 5.0;
+let REP_MERGE_LONG_GAP_PX = 5.0;
 
 // 代表線の最小長（Python の MIN_SEG_LEN に対応）
-let REP_MIN_REP_LEN_PX = 1.0;
+let REP_MIN_REP_LEN_PX = 2.0;
 
 // “包含”の緩和条件（Python の is_candidate_contained_in_group の簡易版）
 let REP_CONTAIN_OVERLAP_RATIO = 0.9;
