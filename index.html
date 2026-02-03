@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <title>線分解析ツール / Line Segment Analyzer Public ver.</title>
+  <title>Line Segment Analyzer Public ver.</title>
   <style>
     body {
       margin: 0;
@@ -230,6 +230,7 @@
       width: auto;
       height: auto;
       display: block;
+      margin: 0 auto; /* ★ キャンパスを枠の中央に配置 */
       border: 1px solid #d1d5db;
       box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
       background-color: #ffffff;
@@ -253,7 +254,7 @@
       font-size: 12px;
       color: #111827;
     }
-
+ 
     #thresholdPanel label {
       display: block;
       margin-bottom: 4px;
@@ -261,6 +262,69 @@
       color: #374151;
       text-align: left;
     }
+
+    /* ファイル選択 UI（日英併記カスタム） */
+    #fileInputRow {
+      margin: 6px 0 10px;
+      font-size: 12px;
+      color: #374151;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    #fileInputLabel {
+      font-weight: 500;
+    }
+
+    /* ネイティブの file input は視覚的に隠す（アクセシビリティ対応） */
+    #imageInput {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    #fileSelectButton {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      background: linear-gradient(135deg, #2563eb, #4f46e5);
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      box-shadow: 0 3px 8px rgba(37, 99, 235, 0.25);
+      transition: transform 0.05s ease-out,
+                  box-shadow 0.1s ease-out,
+                  opacity 0.1s ease-out;
+    }
+
+    #fileSelectButton:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 5px 12px rgba(37, 99, 235, 0.35);
+      opacity: 0.96;
+    }
+
+    #fileSelectButton:active {
+      transform: translateY(0);
+      box-shadow: 0 2px 5px rgba(37, 99, 235, 0.30);
+      opacity: 0.9;
+    }
+
+    #fileNameText {
+      font-size: 11px;
+      color: #6b7280;
+    }
+
 
     #thresholdPanel input[type="number"] {
       margin-left: 4px;
@@ -407,24 +471,23 @@
     <div id="introInner">
       <div id="introText">
         <!-- 題目：日英連続・同じ大きさ・太字 -->
-        <h1 id="introTitle">線分解析ツール&nbsp;Line Segment Analyzer</h1>
+        <h1 id="introTitle">線分解析ツール — Line Segment Analyzer (Public ver.)</h1>
 
         <!-- 説明文：日英併記＋文毎に改行 -->
         <p>
-                本ツールは画像内の線分の位置、角度、長さが美的とされた理由を分析するための解析ツールです。
-                本ツールにおける美的(倫理的)判断の本質は、事物に対して絶対性/普遍性("it must be x")を要求することそのものとします。依拠はKantの『判断力批判』です。
-                何にどのような内容の絶対性/普遍性を要求するかは恣意的であり、"it"にも"x"にも「絶対的/普遍的でないこと」すら含め何でも入力可能です。
-                このため「何があるべきか」つまり美の内容は具体的対象によって定義できず、主観は自由であるため物理指標化は困難です。
-                一方で物理的事象については、個々人がそれを恣意的に受容するかどうかとは別の問題として、例えば「線の関係に絶対性/普遍性があるか」を調べることで、美的要件の存在を解析可能です。
-                本ツールでは、美的要件としての絶対性/普遍性の物理事象における一例として、延長、平行、同一間隔、比率への一致を解析します。
-                絵画、建築物、自動車、その他産業製品等、芸術家やデザイナーがどこに線を合わせたのかをご覧いただけましたら幸いです。<br>
+                One’s "what it is" of things is grounded only in linguistic cognition, whereas one’s "what it must be"—the normative or aesthetic demand on laws, rules, and principles—is grounded only in ethical and aesthetic sense.
+                Taken together, this bifurcation within all real beings presupposes the Creator who bears the authority to realize both "what it is" and "what it must be" for what is created.
+                In terms of the concept of “must,” it is the common element of absoluteness, universality, invariance, eternity, purposiveness, lawfulness, essentiality, criteria of good and evil, criteria of life and death, criteria of existence or nonexistence, and criteria of beauty.
+                <br>
                 This tool analyzes why the positions, angles, and lengths of line segments in an image may be regarded as aesthetically meaningful.
-                Here, the essence of aesthetic (ethical) judgment is taken to be the very act of demanding some form of necessity or universality ("it must be x") from objects; this follows Kant’s Critique of Judgment.
-                What is demanded, and to what object, is arbitrary—both “it” and “x” may include even the negation of necessity/universality.
-                Accordingly, the content of “what ought to be” cannot be defined by concrete objects, and subjective variability makes physical quantification difficult.
-                However, regarding physical configurations, and abstracting from whether individuals happen to accept them, one may examine whether relations among lines exhibit necessity/universality, which enables aesthetic requirements to be analyzed in physical terms.
-                This tool operationalizes such requirements through extensions, parallels, equal intervals, and ratios.
+                Regarding the essence of beauty, in the expression “it must be x,” both “it” and “x” can refer to anything, including even the negation of necessity or universality.
+                Accordingly, the content of “what must be,” that is, the essence of beauty, cannot be defined by concrete objects, and its subjective variability makes physical quantification difficult.
+                On the other hand, in physical configurations, it remains possible to examine whether there exists a “what it must be” in physical terms.
+                This tool operationalizes such “must” through extensions, parallels, equal intervals, and ratios.
                 It allows observation—across paintings, architecture, automobiles, and industrial products—of where artists or designers may have deliberately aligned lines.
+                <br>
+                Usage: Select image → Adjust range filter → Adjust thresholds → Run Analysis → Check whether each segment is design-valid and whether its relations are design-valid<br>
+                使い方：画像選択→範囲フィルタ調整→閾値調整→分析ボタン→デザインとして有効な線分か、その線分間の関係がデザインとして有効かをチェック
         </p>
       </div>
 
@@ -476,21 +539,68 @@
         <canvas id="canvas"></canvas>
       </div>
 
+      <div id="fileInputRow">
+        <span id="fileInputLabel">画像ファイル / Image file:</span>
+        <label for="imageInput" id="fileSelectButton">
+          ファイルを選択 / Choose file
+        </label>
+
+        <input type="file" id="imageInput" accept="image/*">
+      </div>
+
       <div id="canvasHint">
         範囲フィルタ編集 / Range Filter Editing:<br>
         ・節点の追加 … 赤線上をクリック<br>
          &nbsp;&nbsp;Add vertex … Click on the red line<br>
-        ・節点の削除 … Ctrl + クリック（3点未満にはなりません）<br>
-        &nbsp;&nbsp;Delete vertex … Ctrl + Click (cannot reduce below 3 vertices)<br>
+        ・節点の削除 … Ctrl + クリック（最小3点）<br>
+        &nbsp;&nbsp;Delete vertex … Ctrl + Click (minimum 3)<br>
         ・ポリゴン全体の移動 … ポリゴン内側をドラッグ<br>
         &nbsp;&nbsp;Move whole polygon … Drag inside the polygon
       </div>
 
-      <div>
-        <label>
-          画像ファイル / Image file:
-          <input type="file" id="imageInput" accept="image/*">
+      <!-- 範囲フィルタ入出力 -->
+      <div id="rangeFilterIoRow" style="margin: 4px 0 8px; font-size: 12px; max-width: 280px;">
+        <div style="margin-bottom: 4px;">
+          範囲フィルタ頂点の入出力 / Range filter vertices I/O
+        </div>
+
+        <!-- CSV ダウンロードボタン：幅100%でブロック表示 -->
+        <button id="downloadRangeCsvBtn" type="button"
+                style="
+                  display: block;
+                  width: 80%;
+                  text-align: center;
+                  padding: 4px 10px;
+                  border-radius: 999px;
+                  border: 1px solid #d1d5db;
+                  background-color: #ffffff;
+                  font-size: 10px;
+                  line-height: 1.4;
+                  color: #111827;
+                  margin-bottom: 4px;
+                ">
+          範囲フィルタのCSV取得 / Download CSV
+        </button>
+
+        <!-- CSV 復元ボタン（ラベル）：同じ幅100%・ブロック表示 -->
+        <label for="rangeCsvInput"
+               style="
+                 display: block;
+                 width: 80%;
+                 text-align: center;
+                 padding: 4px 10px;
+                 border-radius: 999px;
+                 border: 1px solid #d1d5db;
+                 background-color: #ffffff;
+                 font-size: 10px;
+                 line-height: 1.4;
+                 color: #111827;
+                 cursor: pointer;
+               ">
+          CSVから範囲フィルタ復元 / Load from CSV
         </label>
+        <input type="file" id="rangeCsvInput" accept=".csv,text/csv"
+               style="display:none;">
       </div>
 
       <div id="thresholdPanel">
@@ -498,7 +608,7 @@
           <legend>線分抽出 / Line Extraction</legend>
           <label>
             最小線分長 (px) / Min line length (px):
-            <input type="number" id="minLineLength" step="1" min="1" value="12">
+            <input type="number" id="minLineLength" step="1" min="1" value="6">
           </label>
         </fieldset>
 
@@ -518,8 +628,15 @@
           <legend>平行 閾値 / Parallel Thresholds</legend>
           <label>
             角度差しきい値 (deg) / Angle diff threshold (deg):
-            <input type="number" id="parallelAngle" step="0.1" min="0" max="90" value="2.0">
+            <input type="number" id="parallelAngle" step="0.1" min="0" max="90" value="1.0">
           </label>
+          <!-- 将来使う場合用: 長手方向オーバーラップ率 -->
+          <!--
+          <label>
+            長手方向オーバーラップ率 / In-strip overlap ratio:
+            <input type="number" id="parallelInstrip" step="0.01" min="0" max="1" value="0.01">
+          </label>
+          -->
         </fieldset>
 
         <fieldset>
@@ -528,6 +645,10 @@
             間隔許容誤差 (px) / Interval EPS (px):
             <input type="number" id="intervalEps" step="0.1" min="0" value="1.0">
           </label>
+          <label>
+            角度差しきい値 (deg) / Angle diff threshold (deg):
+            <input type="number" id="intervalAngle" step="0.1" min="0" max="90" value="1.0">
+          </label>
         </fieldset>
 
         <fieldset>
@@ -535,6 +656,10 @@
           <label>
             比率点距離許容誤差 (px) / Ratio point distance EPS (px):
             <input type="number" id="ratioPointEps" step="0.1" min="0" value="3.0">
+          </label>
+          <label>
+            角度差しきい値 (deg) / Angle diff threshold (deg):
+            <input type="number" id="ratioAngle" step="0.1" min="0" max="90" value="1.0">
           </label>
         </fieldset>
 
