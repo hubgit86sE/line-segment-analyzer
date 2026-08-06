@@ -2273,8 +2273,6 @@ function showLineInfo(
   html += `<th class="col-small">angle(deg)</th>`;
   html += `<th class="col-canvas">Object</th>`;
   html += `<th class="col-canvas">AllPatterns(A+B+C)</th>`;
-  html += `<th class="col-small">side1</th>`;
-  html += `<th class="col-small">side2</th>`;
   html += `<th class="col-abc">A</th>`;
   html += `<th class="col-abc">B</th>`;
   html += `<th class="col-abc">C</th>`;
@@ -2285,7 +2283,7 @@ function showLineInfo(
     const rel = extRelations[idx];
     html += `<tr data-idx="${idx}">`;
     html += `<td class="col-small keep-visible"><input type="checkbox" class="row-toggle" data-index="${idx}" checked></td>`;
-    html += `<td class="col-small keep-visible">${idx+1}</td>`;
+    html += `<td class="col-small keep-visible">${idx + 1}</td>`;
     html += `<td class="col-small">${seg.x1}</td>`;
     html += `<td class="col-small">${seg.y1}</td>`;
     html += `<td class="col-small">${seg.x2}</td>`;
@@ -2297,15 +2295,11 @@ function showLineInfo(
     html += `<td class="col-canvas"><canvas id="all_${idx}" style="border:1px solid #ccc;"></canvas></td>`;
 
     if (rel) {
-      html += `<td class="col-small">${rel.side1Match ? "○" : ""}</td>`;
-      html += `<td class="col-small">${rel.side2Match ? "○" : ""}</td>`;
       html += `<td class="col-abc">${rel.matchedA.join(",")}</td>`;
       html += `<td class="col-abc">${rel.matchedB.join(",")}</td>`;
       html += `<td class="col-abc">${rel.matchedC.join(",")}</td>`;
       html += `<td class="col-summary">${rel.summary}</td>`;
     } else {
-      html += `<td class="col-small"></td>`;
-      html += `<td class="col-small"></td>`;
       html += `<td class="col-abc"></td>`;
       html += `<td class="col-abc"></td>`;
       html += `<td class="col-abc"></td>`;
@@ -3071,17 +3065,15 @@ function exportExtensionExcel(lineSegments, extRelations) {
     { header: "y2", key: "y2", width: 8 },
     { header: "length", key: "length", width: 10 },
     { header: "angle(deg)", key: "angle", width: 10 },
-    { header: "side1", key: "side1", width: 8 },
-    { header: "side2", key: "side2", width: 8 },
     { header: "A", key: "A", width: 15 },
     { header: "B", key: "B", width: 15 },
     { header: "C", key: "C", width: 15 },
     { header: "summary", key: "summary", width: 40 },
-    { header: "Object", key: "obj", width: 18 },        // col 14
-    { header: "AllPatterns", key: "all", width: 18 },   // col 15
+    { header: "Object", key: "obj", width: 18 },        // col 12
+    { header: "AllPatterns", key: "all", width: 18 },   // col 13
   ];
 
-  // 各列で必要な「最低列幅」を覚えておく（Object=14, All=15）
+  // 各画像列で必要な最低列幅を記録
   let maxObjWidthPx = 0;
   let maxAllWidthPx = 0;
 
@@ -3103,16 +3095,14 @@ function exportExtensionExcel(lineSegments, extRelations) {
       y2: seg.y2,
       length: seg.length,
       angle: seg.angle,
-      side1: rel.side1Match ? "○" : "",
-      side2: rel.side2Match ? "○" : "",
       A: rel.matchedA.join(","),
       B: rel.matchedB.join(","),
       C: rel.matchedC.join(","),
       summary: rel.summary,
     });
 
-    const rowNumber = row.number; // 1-origin
-    let rowHeightPx = 0;          // この行で必要な px 高さ
+    const rowNumber = row.number;
+    let rowHeightPx = 0;
 
     // Object サムネイル
     const objCanvas = document.getElementById(`obj_${idx}`);
@@ -3125,8 +3115,11 @@ function exportExtensionExcel(lineSegments, extRelations) {
       });
 
       sheet.addImage(imgId, {
-        tl: { col: 13, row: rowNumber - 1 }, // 14列目 => index 13
-        ext: { width: objCanvas.width, height: objCanvas.height },
+        tl: { col: 11, row: rowNumber - 1 }, // 12列目 → 0始まりで11
+        ext: {
+          width: objCanvas.width,
+          height: objCanvas.height,
+        },
       });
 
       rowHeightPx = Math.max(rowHeightPx, objCanvas.height);
@@ -3144,8 +3137,11 @@ function exportExtensionExcel(lineSegments, extRelations) {
       });
 
       sheet.addImage(imgId, {
-        tl: { col: 14, row: rowNumber - 1 }, // 15列目 => index 14
-        ext: { width: allCanvas.width, height: allCanvas.height },
+        tl: { col: 12, row: rowNumber - 1 }, // 13列目 → 0始まりで12
+        ext: {
+          width: allCanvas.width,
+          height: allCanvas.height,
+        },
       });
 
       rowHeightPx = Math.max(rowHeightPx, allCanvas.height);
@@ -3154,21 +3150,23 @@ function exportExtensionExcel(lineSegments, extRelations) {
 
     // 画像がある行だけ、行高を画像に合わせて拡張
     if (rowHeightPx > 0) {
-      const r = sheet.getRow(rowNumber);
-      const current = r.height || 0;
-      const needed = pxToRowHeight(rowHeightPx);
-      if (needed > current) {
-        r.height = needed;
+      const excelRow = sheet.getRow(rowNumber);
+      const currentHeight = excelRow.height || 0;
+      const requiredHeight = pxToRowHeight(rowHeightPx);
+
+      if (requiredHeight > currentHeight) {
+        excelRow.height = requiredHeight;
       }
     }
   });
 
-  // 画像列の幅も、画像サイズに応じて調整
+  // 画像列の幅を画像サイズに応じて調整
   if (maxObjWidthPx > 0) {
-    sheet.getColumn(14).width = pxToColWidth(maxObjWidthPx);
+    sheet.getColumn(12).width = pxToColWidth(maxObjWidthPx);
   }
+
   if (maxAllWidthPx > 0) {
-    sheet.getColumn(15).width = pxToColWidth(maxAllWidthPx);
+    sheet.getColumn(13).width = pxToColWidth(maxAllWidthPx);
   }
 
   downloadWorkbook(workbook, "extension_result.xlsx");
