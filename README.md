@@ -92,7 +92,7 @@ This software is provided for research and illustrative purposes. The author mak
 - Design Evaluation
 - Geometric Structure Analysis
 
-# Search Text
+## Search Text
 
 Line Segment Analyzer is a browser-based geometric structure analysis tool
 for paintings, artworks, industrial design, architecture, automotive design,
