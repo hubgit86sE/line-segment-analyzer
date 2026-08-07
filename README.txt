@@ -4,6 +4,12 @@ Line Segment Analyzer is a browser-based tool for detecting and visualizing line
 
 This repository contains the source code used for illustrative geometric analyses, including detection and visualization of representative line structures, parallel relationships, equal-interval relationships, and ratio-based spatial patterns.
 
+## 🚀 Live Demo
+
+The online version is available here:
+
+**https://hubgit86se.github.io/line-segment-analyzer/**
+
 ## Features
 
 * Browser-based image analysis
